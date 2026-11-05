@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>豪點樂譜辨識</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+<h1>豪點樂譜辨識</h1>
+<p>辨識 PDF 或圖檔裡的五線譜（輸出 MusicXML）或文字（輸出純文字）。全部在這台電腦上執行，不需要網路。</p>
+
+<form id="form">
+  <fieldset>
+    <legend>要辨識什麼</legend>
+    <label><input type="radio" name="mode" value="score" checked> 樂譜：用 Audiveris 與 homr 辨識五線譜，交叉比對</label><br>
+    <label><input type="radio" name="mode" value="text"> 文字：辨識題目、選項等文字（掃描檔、照片也可以），譜例的位置標成［譜例］</label>
+  </fieldset>
+
+  <h2>選擇檔案</h2>
+  <p>
+    <label for="file">PDF 或圖檔</label><br>
+    <input type="file" id="file" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.gif,.webp" required>
+  </p>
+  <p>
+    <label for="pages">PDF 頁碼（例如 8,10 或 8-10；不填是全部頁）</label><br>
+    <input type="text" id="pages" inputmode="numeric" autocomplete="off">
+  </p>
+
+  <div id="score-opts">
+    <h2>手打的版本（可不選）</h2>
+    <p>
+      <label for="refs">手打的 MusicXML，可以選多個檔，依行譜由上到下的順序（vi-tools 點字樂譜轉換器匯出的 MusicXML 也可以）</label><br>
+      <input type="file" id="refs" accept=".musicxml,.xml,.mxl" multiple>
+    </p>
+    <p>選了手打版本會三方比對，「兩個工具一致、跟手打不同」的地方排在最前面，最可能是手打錯；沒選就比對兩個工具。沒有五線譜的頁會自動略過。</p>
+  </div>
+
+  <div id="text-opts" hidden>
+    <p><label><input type="checkbox" id="text-layer"> PDF 有文字層（電子檔）時直接使用文字層</label></p>
+    <p>文字層的字最準，但選項的圈號（例如 ❶）可能不見，也不會標出譜例的位置；不勾就一律辨識。</p>
+  </div>
+
+  <p><button type="submit" id="go">開始辨識</button></p>
+</form>
+
+<section aria-labelledby="h-progress">
+  <h2 id="h-progress">進度</h2>
+  <div id="status" role="status" aria-live="polite"></div>
+  <ul id="log"></ul>
+</section>
+
+<section id="result" hidden aria-labelledby="h-result">
+  <h2 id="h-result" tabindex="-1">結果</h2>
+  <ul id="files"></ul>
+  <p><button type="button" id="open">開啟輸出資料夾</button></p>
+  <div id="text-box" hidden>
+    <h3><label for="text-out">辨識出的文字</label></h3>
+    <p><button type="button" id="copy">複製全部文字</button></p>
+    <textarea id="text-out" rows="16" readonly></textarea>
+  </div>
+  <h3>報告</h3>
+  <pre id="report"></pre>
+</section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+body { font-family: "Microsoft JhengHei", system-ui, sans-serif; font-size: 18px; line-height: 1.6; margin: 0; background: #fff; color: #111; }
+main { max-width: 52rem; margin: 0 auto; padding: 1rem 1.5rem 3rem; }
+h1 { font-size: 1.8rem; }
+h2 { font-size: 1.3rem; margin-top: 1.6rem; }
+input[type=text] { font-size: 1rem; padding: .3rem; width: 16rem; }
+button { font-size: 1.05rem; padding: .4rem 1.2rem; }
+button:focus, input:focus, a:focus, [tabindex]:focus { outline: 3px solid #1a5fb4; outline-offset: 2px; }
+#status { font-weight: bold; min-height: 1.6em; }
+#log { color: #333; }
+fieldset { border: 1px solid #999; padding: .6rem 1rem; }
+legend { font-weight: bold; }
+textarea { width: 100%; font-size: 1rem; font-family: "Microsoft JhengHei", sans-serif; }
+pre { white-space: pre-wrap; background: #f6f6f6; padding: 1rem; border: 1px solid #ccc; font-family: "Microsoft JhengHei", monospace; }
