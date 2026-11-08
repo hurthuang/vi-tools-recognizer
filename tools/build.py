@@ -1,10 +1,12 @@
-"""組出可攜版資料夾 dist\\豪點樂譜辨識\\ 並壓成 zip。
+"""組出可攜版資料夾 dist\\vi-tools辨識套件\\ 並壓成 zip。
 
 需要（放在 build\\）：
   dl\\python-3.12.10-embed-amd64.zip   python.org 的嵌入式 Python
   site-packages\\                      python -m pip install --target build\\site-packages homr==0.7.0 onnxruntime "pypdfium2>=4,<6"
                                        （homr 的模型要先下載進去：跑一次 homr --init，或從已下載的地方複製 .onnx）
   audiveris\\                          Audiveris 5.11.0 Console 版 msi 用 msiexec /a 解開後的 Audiveris 資料夾
+  models\\mfd、models\\mfr              試卷辨識的算式模型（Pix2Text mfd-1.5-onnx、mfr-1.5-onnx，從 %APPDATA%\\pix2text\\1.1 複製）
+  site-packages 另外要有 tokenizers   試卷辨識的 MFR 用（不需要 huggingface_hub）
 用法：python tools\\build.py [--zip]
 """
 import shutil
@@ -14,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 B = ROOT / 'build'
-NAME = '豪點樂譜辨識'
+NAME = 'vi-tools辨識套件'
 DIST = ROOT / 'dist' / NAME
 PY_ZIP = B / 'dl' / 'python-3.12.10-embed-amd64.zip'
 
@@ -26,7 +28,8 @@ def copytree(src, dst):
 
 
 def main():
-    for need in (PY_ZIP, B / 'site-packages', B / 'audiveris' / 'Audiveris.exe'):
+    for need in (PY_ZIP, B / 'site-packages', B / 'audiveris' / 'Audiveris.exe', B / 'site-packages' / 'tokenizers',
+                 B / 'models' / 'mfd' / 'pix2text-mfd-1.5.onnx', B / 'models' / 'mfr' / 'decoder_model.onnx'):
         if not need.exists():
             sys.exit('缺少 ' + str(need))
     DIST.mkdir(parents=True, exist_ok=True)
@@ -46,8 +49,16 @@ def main():
     if not (au / 'Audiveris.exe').exists():
         print('複製 Audiveris…')
         copytree(B / 'audiveris', au)
+    if not (sp / 'tokenizers').exists():
+        print('複製 tokenizers…')
+        for p in (B / 'site-packages').glob('tokenizers*'):
+            shutil.copytree(p, sp / p.name, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+    mo = DIST / 'runtime' / 'models'
+    if not (mo / 'mfr' / 'decoder_model.onnx').exists():
+        print('複製算式模型…')
+        copytree(B / 'models', mo)
     copytree(ROOT / 'app', DIST / 'app')
-    for f in ('豪點樂譜辨識.cmd', '說明.txt'):
+    for f in ('vi-tools辨識套件.cmd', '說明.txt'):
         shutil.copyfile(ROOT / 'dist-files' / f, DIST / f)
     copytree(ROOT / 'dist-files' / '授權', DIST / '授權')
     (DIST / '輸出').mkdir(exist_ok=True)

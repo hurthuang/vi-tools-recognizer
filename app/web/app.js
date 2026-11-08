@@ -18,9 +18,10 @@
   };
 
   const syncMode = () => {
-    const text = mode() === 'text';
-    $('score-opts').hidden = text;
-    $('text-opts').hidden = !text;
+    const m = mode();
+    $('score-opts').hidden = m !== 'score';
+    $('text-opts').hidden = m !== 'text';
+    $('exam-opts').hidden = m !== 'exam';
   };
   document.querySelectorAll('input[name=mode]').forEach((r) => r.addEventListener('change', syncMode));
   syncMode();
@@ -33,45 +34,33 @@
     $('result').hidden = true;
     $('log').innerHTML = '';
     shown = 0;
-    say('上傳中…');
+    say('讀取檔案中…（只在這台電腦處理，不會傳到網路）');
     try {
       const m = mode();
       const refs = [];
       if (m === 'score') for (const r of $('refs').files) refs.push({ name: r.name, data: await readB64(r) });
-      const res = await fetch('/api/jobs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: m, name: f.name, data: await readB64(f), pages: $('pages').value, refs, textLayer: $('text-layer').checked }),
-      });
-      const j = await res.json();
-      if (!res.ok) throw new Error(j.error || res.statusText);
-      jobId = j.id;
-      say(m === 'text' ? '文字辨識中，請稍候。每頁大約 3 到 10 秒，完成時會通知。' : '辨識中，請稍候。每張圖大約 30 到 60 秒，完成時會通知。');
-      poll();
+      say({ text: '文字辨識中，請稍候。每頁大約 3 到 10 秒。', exam: '試卷辨識中，請稍候。每頁大約 10 到 30 秒。' }[m] ||
+        '辨識中，請稍候。每張圖大約 30 到 60 秒。');
+      const showLog = (j) => {   // 進度對話框後面的記錄照樣列出來
+        for (; shown < j.log.length; shown++) {
+          const li = document.createElement('li');
+          li.textContent = j.log[shown];
+          $('log').appendChild(li);
+        }
+      };
+      const j = await haodianRun({ mode: m, name: f.name, data: await readB64(f), pages: $('pages').value, refs,
+        textLayer: m === 'exam' ? $('exam-text-layer').checked : $('text-layer').checked }, { onPoll: showLog });
+      if (!j) { say('已停止，沒有做完的頁。'); return; }
+      done(j);
     } catch (err) {
-      say('無法開始：' + err.message);
+      say('辨識失敗：' + err.message);
+    } finally {
       $('go').disabled = false;
     }
   });
 
-  async function poll() {
-    let j;
-    try {
-      const res = await fetch('/api/jobs/' + jobId);
-      j = await res.json();
-    } catch (err) {
-      say('連不到本機服務，黑色視窗是否被關掉了？');
-      $('go').disabled = false;
-      return;
-    }
-    for (; shown < j.log.length; shown++) {
-      const li = document.createElement('li');
-      li.textContent = j.log[shown];
-      $('log').appendChild(li);
-    }
-    if (j.state === 'running') return setTimeout(poll, 1000);
-    $('go').disabled = false;
-    if (j.state === 'error') return say('辨識失敗：' + (j.log[j.log.length - 1] || ''));
+  function done(j) {
+    jobId = j.id;
     const ul = $('files');
     ul.innerHTML = '';
     for (const f of j.files) {
@@ -83,11 +72,13 @@
       li.appendChild(a);
       ul.appendChild(li);
     }
+    $('exam-link').hidden = !j.exam;
+    if (j.exam) $('exam-a').href = '/exam/?name=' + encodeURIComponent(j.exam);
     $('text-box').hidden = !j.text;
     $('text-out').value = j.text || '';
     $('report').textContent = j.report;
     $('result').hidden = false;
-    say('辨識完成，結果在下方。');
+    say(j.log.some(x => x.startsWith('已停止')) ? '已停止，做完的部分在下方。' : '辨識完成，結果在下方。');
     $('h-result').focus();
   }
 

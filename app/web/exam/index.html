@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<title>試卷版面調整 - vi-tools 辨識套件</title>
+<link rel="stylesheet" href="style.css">
+<script>
+window.MathJax = {
+  tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']] },
+  svg: { fontCache: 'global' },
+  startup: { typeset: false }
+};
+</script>
+<script src="tex-svg.js" defer></script>
+<script src="../progress.js" defer></script>
+<script src="app.js" defer></script>
+</head>
+<body>
+<header id="bar">
+  <a href="../" title="回到vi-tools 辨識套件首頁">首頁</a>
+  <details class="menu" id="m-open">
+    <summary title="選 PDF 或圖檔，辨識完直接在這裡打開">開啟檔案…</summary>
+    <div class="menu-list">
+      <label>頁碼 <input type="text" id="openpages" size="8" placeholder="全部" title="例如 1-3 或 2,4；不填是全部頁" autocomplete="off"></label>
+      <button id="b-open" type="button">選擇 PDF 或圖檔…</button>
+    </div>
+  </details>
+  <input type="file" id="openfile" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.gif,.webp" hidden>
+  <label>試卷 <select id="exam"></select></label>
+  <span class="sep"></span>
+  <button id="b-order" type="button" title="依序點各區塊，照點的順序排（O）">排順序</button>
+  <button id="b-undo" type="button" title="Ctrl＋Z">復原</button>
+  <details class="menu" id="m-redo">
+    <summary title="重新自動判斷，或把區塊全部拿掉自己重新框（都可以按復原）">重來</summary>
+    <div class="menu-list">
+      <button id="b-reset" type="button">重新自動判斷（改過的會清掉）</button>
+      <button id="b-clear-page" type="button">清除這一頁的區塊</button>
+      <button id="b-clear-all" type="button">清除全部頁的區塊</button>
+    </div>
+  </details>
+  <span class="grow"></span>
+  <details class="menu right" id="m-out">
+    <summary title="複製、存檔、匯出觸圖">輸出</summary>
+    <div class="menu-list">
+      <button id="b-send" type="button" title="打開 vi-tools 文件整理，把排好的文字帶過去（標成已排版，不會再做斷行整理）；同時複製到剪貼簿">送到文件整理</button>
+      <button id="b-copy" type="button">複製全部文字</button>
+      <button id="b-save" type="button">存成 .txt</button>
+      <button id="b-vtdoc" type="button" title="vi-tools 中繼檔：用瀏覽器打開就是 NVDA 易讀的電子檔（標題可以跳、表格逐格讀、算式用 MathML 念），之後可以送去轉點字、做 MP3">存成中繼檔（.vtdoc.html）</button>
+      <label title="附圖、算式的原卷裁圖放進中繼檔；圖很多的課本可以不放，檔案會小很多"><input type="checkbox" id="vt-images" checked> 中繼檔包含圖片</label>
+      <label title="原卷（PDF 或圖檔）放進中繼檔，nc 算式校對等工具可以對照整頁原卷；原始檔超過 15 MB 改放縮小的頁面圖"><input type="checkbox" id="vt-source" checked> 中繼檔包含原卷</label>
+      <button id="b-tactile" type="button" title="輸出方式是「標記」的附圖，存成 vi-tools 觸圖製作的編輯檔：每張附圖一頁，圖裡的字當點字標籤放在原位，打開後可以描圖修改">附圖→觸圖（.tactile）</button>
+      <label title="大題、題目加上 <h2>、<h3> 標籤"><input type="checkbox" id="tags"> 標題標籤</label>
+    </div>
+  </details>
+</header>
+<main>
+  <nav id="thumbs" aria-label="頁面"></nav>
+  <section id="pagepane" aria-label="原卷">
+    <div id="zoombar">
+      <button id="z-out" type="button" aria-label="縮小">－</button>
+      <span id="z-val">100%</span>
+      <button id="z-in" type="button" aria-label="放大">＋</button>
+      <button id="z-fit" type="button">符合寬度</button>
+      <span id="hint">拖曳空白處＝新增區塊　點區塊＝選取（Shift 加選）　數字鍵改類型　Delete＝刪除</span>
+    </div>
+    <div id="pagewrap"><img id="pageimg" alt="原卷"><svg id="overlay"></svg></div>
+  </section>
+  <section id="result" aria-label="結果">
+    <div id="resbar">
+      <label><input type="radio" name="view" value="math" checked> 排好的樣子</label>
+      <label><input type="radio" name="view" value="src"> LaTeX 原文</label>
+      <label><input type="checkbox" id="allres"> 顯示整份</label>
+    </div>
+    <div id="props" hidden>
+      <span id="p-head"></span>
+      <label>類型 <select id="p-type" title="數字鍵也可以改：1 題目、2 選項…0 略過"></select></label>
+      <span id="blockops">
+        <button id="b-edit" type="button" title="直接修改這塊的文字（E 或 Enter；右邊連按兩下也可以）">修改文字</button>
+        <button id="b-reocr" type="button" title="只重新辨識這一塊（R）">重新辨識</button>
+        <button id="b-merge" type="button" title="Shift＋點選多塊後合併（G）">合併</button>
+        <button id="b-allpages" type="button" title="這一塊的位置，每頁都改成同樣類型（例如頁首每頁都略過）">套用到所有頁</button>
+        <button id="b-del" type="button" title="刪除這塊（Delete）；框裡的字不會輸出">刪除</button>
+      </span>
+      <span id="p-extra"></span>
+    </div>
+    <div id="restext"></div>
+  </section>
+</main>
+<footer id="status" role="status" aria-live="polite"></footer>
+</body>
+</html>

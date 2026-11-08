@@ -34,10 +34,81 @@ python -m pip install --target build\site-packages homr==0.7.0 onnxruntime "pypd
 （homr 模型：從已跑過 homr --init 的環境複製 homr\segmentation\*.onnx、homr\transformer\*.onnx）
 build\dl\python-3.12.10-embed-amd64.zip（python.org）
 build\audiveris\（Audiveris-5.11.0-windowsConsole-x86_64.msi 用 msiexec /a 解開）
+build\site-packages\tokenizers（試卷辨識用；從有 tokenizers 0.22 的環境複製 tokenizers 與 dist-info，不需要 huggingface_hub）
+build\models\mfd、build\models\mfr（%APPDATA%\pix2text\1.1\mfd-1.5-onnx、mfr-1.5-onnx 的內容）
 python tools\build.py --zip
 ```
 
+## 試卷辨識（0.3，`app/exam/`）
+
+- 來源：E:\Project\agy-work\20261105-mathocr 的試做（19 份數學試卷、2,028 個算式，跟使用者手打版比對）。
+- **模型**：Pix2Text 1.5 的 MFD（找算式，YOLO11m）、MFR（算式 → LaTeX），都只用 onnxruntime 跑，不用 torch（551 MB）。
+  - `ort_mfd.py` 照 ultralytics 重寫前處理：letterbox auto（只補到 32 的倍數）、INTER_LINEAR、補 114、置中 round(d±0.1)；輸出 (1,6,N)，conf 0.25、類別位移 NMS iou 0.7、max_det 300；再照 cnstd 排序、去重（部分重疊 0.1）。19 份 2,976 個框跟 torch 版 100% 相同。不用 auto（補成正方形）只有 97.3% 相同。
+  - `ort_mfr.py`：DeiT 前處理（384×384 bicubic、(x/255−0.5)/0.5）＋ greedy decode；`pix2text_post.py` 是 Pix2Text 的後處理（MIT）。
+  - 授權：模型卡寫 MIT，但 MFD 的 ONNX metadata 寫 AGPL-3.0（Ultralytics）；辨識套件本來就是 AGPL。
+- **文字**：PDF 有文字層時中文、題號、選項讀文字層（`textlayer.py`，pypdfium2 逐字框，濾淺色浮水印，Symbol 字型私用區對照）；算式框裡其實是一行中文的（「圖（二）」被當算式）改回文字。掃描檔、圖檔用 RapidOCR（跟文字辨識共用引擎）。
+- **排版**（`mathocr.py`、`layout.py`）：算式沒包到的括號、數字收進算式；算式頭尾的 , . ; 、依前後文移到算式外（冒號不動，比例式）；自動分區塊（題目、選項、附圖、略過…），頁首頁尾重複的略過；輸出 `\( \)` 寫法。
+- **版面調整畫面**（`/exam/`，`app/web/exam/`，MathJax 本機檔）：三欄對照、拖曳改框、數字鍵改類型、排順序、重新辨識一塊、修改文字。資料在 `輸出\<資料夾>\試卷資料\`（pNN.png／json、tNN.json、edits.json），每次修改自動重寫上一層的 `試卷.txt`。
+- 19 份試做結果（文字層）：題號 99.1%、選項數 91.7%、算式 1,780／2,028 完全相同、文字 93.5%。
+- 速度：一頁約 20～60 秒（MFR 逐字解碼最慢）。
+- Windows 上 `ThreadingHTTPServer` 預設 SO_REUSEADDR，第二個辨識套件會綁到同一個連接埠、請求被舊的接走；`server.Server` 改成 SO_EXCLUSIVEADDRUSE，佔用時換下一個連接埠。
+
 ## 之後
 
-- 外掛模式：vi-tools 轉換器偵測 `http://127.0.0.1:18760～18779/api/info`，出現「辨識樂譜」按鈕（要加 CORS 與來源白名單；Chrome 會詢問本機網路存取）。
-- 瘦身（目前 zip 347 MB）。
+- 外掛模式：vi-tools 轉換器偵測 `http://127.0.0.1:18760～18779/api/info`，出現「辨識樂譜」按鈕（要加 CORS 與來源白名單；Chrome 會詢問本機網路存取）。試卷的「辨識一塊」已經這樣做了（`/api/ocr`，見下面中繼檔一節）。
+- 瘦身（0.2 的 zip 347 MB；0.3 加試卷辨識後 528 MB）。
+
+### 0.3 之後補的（2026-11-06，使用者試用回饋）
+
+- 版面調整畫面加「開啟檔案…」（直接辨識新檔）、「刪除區塊」（Delete；0 是略過），右邊窗格題目、大題前空一行。
+- **斷行**（`layout.paragraphs`）：上一行寫到區塊右邊（差不到 1.5 個字高）才接起來，否則保留換行；●①(甲)(1) 這類開頭一定換行。題目區塊比較保守（旁邊有附圖時每行都短）：短行還要句尾是標點、或上一段是項目才斷。19 份分數沒變差（題號 460→462）。vi-tools 的「合併換行」只看文字（標點），這裡有位置資訊，所以在辨識端先處理。
+- **表格**（`layout.table_grid`／`table_rows`）：區塊改成表格時，框裡的字全收進來（前端 `claimBox`）。橫線用寬度一半的開運算找；直線長度門檻是 1.5 個列高（框常包到表格外的字，不能用框高）。每列檢查直線有沒有穿過，沒穿過就合併成 colspan。框邊也當線，框邊外、沒有直線穿過的那條是表格外的字（上面的接回題幹）。左右整欄空的拿掉。輸出 `<table border="1">`（使用者手打版的格式），右邊窗格只取格子文字重建表格（不直接塞 innerHTML）。
+- **附圖裡的字（2026-11-07）**：`textlayer.page_layer` 每頁各自判斷有沒有文字層（少於 20 字＝掃描頁，整頁用 OCR）；有文字層的頁，內嵌圖片範圍（`image_regions`，頁面 0.3%～60%）裡、文字層沒有字的 OCR 行保留（tNN.json 的 `keep_ocr`，項目標 `src='ocr'`）。夠大的內嵌圖片直接當附圖，圖裡的字、旁邊 60 px 內的短標籤、100 px 內 3 字以下的標籤（地圖上的「(丁)」）都歸附圖；第二輪用加上標籤後的範圍收直排座標軸名稱。右邊窗格用灰字顯示圖中的字（`seg.hint`，不輸出；勾「圖裡的字也放進題目」或 E 改寫才輸出）。
+  - 實際資料：113～115 青年／複習試卷與 115 補充教材 PDF 全部有文字層，附圖幾乎都是內嵌圖片而且多半有字（地理 8／9 張、自然 12／14、補充講義 7／7）；使用者手打版常把附圖內容改寫成文字（氣候資料、表格、地名選項）或標「此題型盲生不適合作答」。
+  - 19 份數學卷：附圖 53→55、選項數 424→425、算式 1,778→1,777，其他不變；掃描頁（3b5、mock 共 3 頁）改成整頁辨識。
+- 斷行規則補充：「圖」「表」結尾的下一行「(四)」不是項目；「甲、冬季…」是項目，「甲、乙兩人」不是。題幹中間的 (Ａ)…(Ｂ) 不一定在最後一段也會拆。跨頁接續（`page_continuations`）：一頁第一塊是文字、上一頁最後是題目或選項，就接回上一行。
+- **附圖處理方式、刪題（2026-11-07）**：附圖區塊 `how`＝mark（只標記，預設）／figtext（標記＋圖中文字，舊的 `figtext: true` 相容）／text（改成文字，不標附圖；按 E 改寫附圖時自動切成 text）／none。題目區塊 `drop: true` → 「N. 「此題型盲生不適合作答」」，後面的選項、文字、附圖都不輸出；`render(drops=[])` 收集、`drop_report` 依大題寫 刪題說明.txt（大題標題的「每題 N 分」算分數；整個大題刪光寫「刪除全部」）。
+- **自動表格**：附圖候選（向量或內嵌圖片）有 ≥3 條橫線、≥3 條直線，而且格子 60% 以上有字、不是只有 A、甲、∠ 這種頂點標記（`table_like`）→ 直接當表格、框裡的字全收。19 份數學卷自動轉了 20 個表格、沒有幾何圖誤判；多標附圖 124→115、文字 93.4%→93.6%。地理卷第 2 題的氣候表（文字層畫的表）數字全對。
+- **符號裝飾列**（`DECOR`）：三個以上的 (●)(⊗)(♣)… 連在一起拿掉，整行只剩符號的略過。
+- **附圖→觸圖（2026-11-07）**：`layout.tactile_figures` 找出輸出方式是 mark／figtext、不在刪掉的題目裡的附圖（標題「第N題」＋圖說，同一題多張加「圖2」）；標籤是框裡的字（算式用 `tex_plain` 轉成 30°、1/2 這類文字，16 字以上、圖說不放）。`review.export_tactile` 每張附圖裁成 PNG（外加 6 px），寫成 vi-tools 觸圖製作的編輯檔 `附圖.tactile`（`pages[].src.{image, labels}`，沒有點陣與紙張，觸圖製作打開時才轉；要 vi-tools `tactile-figures` 分支）。GET `/exam/api/tactile/<資料夾>` 下載，版面調整畫面的「附圖→觸圖（.tactile）」按鈕。地理卷 18 張 790 KB、補充講義 16 張 620 KB。
+- **兩欄修正（2026-11-07，使用者回報地理卷「拆分整個亂掉」）**：版面調整畫面拉框新增區塊時，閱讀順序原本只看高度（`box[1] <= 新框上緣` 的都排前面），兩欄時右欄上半部的題目會被插到左欄中間。改成 `newBlockOrder`：排在框住的字或區塊原本最前面的位置；什麼都沒框到就排在同一欄（左右重疊 30% 以上）上方最近那塊後面。自動分區塊：跨兩欄、在頁面上方 1/4 的附圖當頁首（zone 0，扁的改成略過），頁首範圍裡的「二年 班 號 姓名」也排最上面。19 份數學卷多標附圖 115→110，其他不變。
+- **表格的輸出方式（2026-11-07）**：表格區塊 `how`＝table（保留 `<table border="1">`，預設）／rows（文字以列為軸：「月均溫：1月 -3.7℃，2月 …」）／cols（以欄為軸：「1月：月均溫 -3.7℃，降水量 3mm」）／mark（只標「(請參閱附表)」，表格下面的字照放）／none。`hrow`、`hcol`（第一列、第一欄是不是標題，沒設＝自動：第一欄不是數字、其他格大多是數字）。`table_text`：合併儲存格的字填到跨的每一格、標題的單位「（℃）」移到數字後面（括號裡有數字的不算單位）、重複的標題列（1～6 月、7～12 月兩段）接成一張、兩層標題列（左上角空白）合成「價格 中杯」。附圖和表格互換類型時清掉 `how`。vi-tools 的 html-table.js（分支 `html-tables`）用同樣的規則，改一邊要一起改。19 份數學卷分數不變。
+- **選項是圖（2026-11-07）**：使用者手打版的寫法是題幹下一行「(選項請參閱附圖)」、不列 (A)～(D)（113～114 點字試卷各科都這樣）。`empty_options`：選項區塊只有字母沒有內容＝選項是圖 → 輸出一行 `OPT_FIG_TEXT`（右邊窗格同樣顯示；按 E 改寫成文字描述就照老師寫的）。`image_options` 找出這種題目，`is_option_figure`（同一頁、離選項字母 150 px 內、不是整個在選項上面）判斷哪些附圖是選項的圖：題幹不再標「(請參閱附圖)」；觸圖匯出時同一題的選項圖合成一頁「第N題 選項」，選項字母 A～D 當標籤放在原位。19 份：選項數 425→430；手打版有寫的 6 題對 5 題（3b3 第 9 題 (D) 混進試卷代碼沒認出），另 7 題辨識套件判斷是圖選項、手打版多半是刪題（此題視障生不作答）。
+- **大框收走圖裡的字（2026-11-07，使用者回報 115 三年級段考地理第 1 題）**：老師拉了一個包住四張選項圖的「選項」大框，圖裡的「原料、市場、勞力、技術」被收進選項，輸出「(B) 原料原料市場…」，附圖 0 個項目。`figures_own_labels`（載入 edits.json 與自動分區塊時都跑）：選項框整個包住兩張以上附圖時，框裡落在那些附圖裡的短字（6 字以內、短算式；選項字母、題號除外）還給附圖。只限包住兩張以上附圖，是因為自動框的附圖有時太大、會包到真的選項值（鳳山 3a2「(A) 30°」）。前端 `claim` 同樣規則：拉選項、文字框時，整個包在框裡的附圖保有圖裡的字。19 份分數不變。
+- **工具列整理（2026-11-07，使用者覺得按鈕太多）**：上方只留整份用的：首頁、「開啟檔案…」選單（頁碼＋選檔）、試卷、排順序、復原、「重來」選單（重新自動判斷、清除這一頁／全部頁的區塊）、「輸出」選單（複製、存 .txt、附圖→觸圖、標題標籤）。類型 10 個按鈕改成屬性列的下拉選單（`#p-type`，「4 附圖」這樣寫數字鍵），區塊操作（修改文字、重新辨識、套用到所有頁、刪除；選兩塊以上時是合併）也搬到屬性列（`#blockops`，固定的 HTML；跟類型有關的設定在 `#p-extra`）。選單是 `<details class="menu">`：點外面、選了一項、Esc 收起；靠右的選單換行到左邊時往右展開（`.flip`）。快捷鍵不變。清除區塊（新功能）：`data.blocks[cur] = []` 或全部頁，可以復原。
+
+## 辨識進度視窗（2026-11-07）
+
+- `web/progress.js`（首頁與版面調整畫面共用）：`haodianRun(payload, {onPoll})` 送出工作、每秒問一次，`<dialog>` 顯示第幾頁／共幾頁、經過時間、預估剩下（做完的頁平均，扣掉目前這頁已花的時間）、停止。狀態列只在換頁時更新，NVDA 不會一直念；Esc 不關對話框。
+- 後端：`Job.progress(done, total)`、`Job.cancel`（threading.Event）、`POST /api/jobs/<id>/cancel`；`review.process`、`ocr.run`、`job.run` 每頁（張）回報進度，設了 cancel 就做完這頁停下，只留做完的頁；一頁都沒做完時狀態是 `stopped`（不算錯誤、不寫 錯誤.txt）。
+- 另一份辨識還在跑時（共用 LOCK）會記「等前一份辨識做完…」。
+
+## 直書（2026-11-07）
+
+- `exam/vertical.py`：直書頁在內部轉成「工作座標」（逆時針轉 90 度，欄變成行），分題、兩欄、表格、附圖照舊。rot＝1；畫面 (dx,dy)→工作 (dy, Wd−dx)。`pNN.png` 直立（畫面、觸圖），`pNNr.png` 轉過（找圖、格線），`pNN.json` 是工作座標。`review.api_state`／`handle` 用 `to_client`／`from_client` 在邊界轉換，前端不用改。
+- 判斷：文字層前後字往下接多於往右接（`chars_vertical`），沒有文字層看 OCR 行是不是瘦長（`items_vertical`）。
+- 文字層：`textlayer.frame` 修正可見範圍原點（出版社 PDF 的裁切框不是從 0 開始，以前字會偏 39 點；橫書也受影響）、頁面 /Rotate 90（Word 直書）換成畫面座標、裁切框外的字（印刷資訊）丟掉。直書頁照位置排字序（`geometric_order`，pdfium 字序是亂的），直書裡橫寫的兩位數上下疊要倒過來；橫寫字串（頁首課名）另成一行（`horizontal_runs`）；行號丟掉（`drop_line_numbers`）；Word 注音字型標正確字注音留下的小字丟掉（`drop_tiny`）。
+- 分段：圖上貫穿的分隔線（`walls`，記上下範圍，線沒經過的標題不切）＋所有行都空的直帶（`gutters`，本文／注釋）；auto_blocks 有 walls 時用它分欄。
+- 共用改進：⒈→1.、⑴→(1)（`enclosed`）；括號還沒關的行接下一行；大題標題寫滿折行接回去；直書頁「附圖」裡有 3 個以上文字層國字／注音的（注音方格）不當附圖。
+- 19 份數學卷：版面分數不變，文字 35296→35314（⑵→(2)）。
+- Word 注音字型：「只印注音」的字型（ZhuYinNR）疊在國字旁＝改錯字題錯字旁標的正確字注音，丟掉；單獨的（寫國字題「「ㄉㄨㄥ」瓜茶」）留著輸出國字（點字照讀音轉就是那個注音）。
+- 大題標題折行只接一行，而且上一行要寫滿、下一行不是題號／項目；標題框裡多的行照一般文字輸出（以前只輸出第一行，其他行會不見）。
+- 打分數：.doc 用 Word 唯讀讀文字（scratchpad doc2txt.ps1，Open 給假密碼、不轉換、讀 StoryRanges，不存檔），存在 E:\Projectgy-work61107-vertical
+ef；vert_score.py 逐字比對。16 份國語卷（學用）**95.6%**（隨堂卷 88～99%、月考卷 91～98%）。差異多在注音方格題、選詞表格（Word 表格在參考答案裡的位置與順序也不同）。
+- 還沒做：注音方格題（使用者說先跳過）、直書掃描檔、課本插圖與裝飾會被標成很多附圖。
+
+## 送到文件整理（2026-11-07）
+
+- 版面調整畫面「輸出」→「送到文件整理」（`sendToVitools`）：先複製到剪貼簿，`window.open(<vi-tools>/pdf-to-accessible.html#from=haodian)`，等對方回 `vitools-ready` 再 `postMessage({type:'haodian-text', name, text, formatted:true})`。vi-tools 位置預設線上版，`localStorage['haodian.vitools']` 可以改（測試用本機副本）。20 秒沒回應就提示貼上。
+- 文件整理那邊在 vi-tools `html-tables` 分支（docs/notes/html-table.md）：只收本機來源、開它的視窗送的訊息；已排版時自動調整跳過斷行整理。
+- 闈場沒有網路：線上版打不開，要等「文件整理呼叫本機辨識套件」（整合 B）或桌面版。
+
+## 中繼檔 .vtdoc.html（2026-11-07）
+
+- 規格草稿：E:\Project\vtdoc-規格草稿.md（定案後放 vi-tools docs/notes/vtdoc.md）。
+- `layout.render_nodes`：render 改成先產生節點 [文字, 標籤, 資訊（kind、頁、區塊、題號、how…）]，`render` 只是把節點接成文字；附圖、表格本身是文字為 None 的節點。56 份試卷新舊 render 逐字相同。
+- `exam/vtdoc.py`：節點 → HTML。算式包成 `span.vt-math[data-tex]`，用區塊裡的算式項目對回信心與原卷裁圖；表格用 HTMLParser 讀 `<table border="1">`（辨識套件產生或手打）再輸出 vt-table；附圖裁圖（灰階、長邊 1400、照片用 JPEG）＋圖中文字位置。看得到的文字＝試卷.txt（檢查腳本 scratchpad vt_test.py）。
+- 版面調整畫面「存成中繼檔」：GET /exam/api/vtdoc/<資料夾>?images=0|1，前端用 `MathJax.tex2mml` 把每個算式轉成 MathML 再下載；輸出資料夾的那份沒有 MathML。
+- 2026-11-08 原卷與位置（vi-tools 規格第 3.9 節）：`?source=0|1`（版面調整「中繼檔包含原卷」，預設勾）。`來源.pdf` 不超過 15 MB 原樣放（base64，`page_map` 記原始頁碼），超過或圖檔來源放每頁灰階 JPEG（長邊 1600）；算式與每個區塊寫 `data-box="頁 x0 y0 x1 y1"`（頁面圖比例，直書用 box_v2d 轉回原卷方向）。測試腳本 scratchpad vt_src_test.py。`meta.omitted`：略過的區塊（skip）、沒被收進任何區塊的字（uncovered，edits.json 手動刪框、縮框之後才有），給 nc 標「要檢查」（vt_omit_test.py 模擬刪框）。輸出資料夾沒有 來源.*（11-07 以前辨識的）時，原卷改放每頁辨識圖。
+- **給 vi-tools 的辨識一塊（2026-11-08，`exam/region.py`）**：`GET /api/ocr`（偵測）、`POST /api/ocr`。只有這兩個接受跨來源請求，來源白名單 `VITOOLS_ORIGIN`：線上版 hurthuang.github.io、桌面版 vitools.local、127.0.0.1／localhost；預檢回 `Access-Control-Allow-Private-Network`。送法兩種：圖（`image` dataURL，只用辨識）；PDF（`pdf_sha256`＋`page`＋`box` 比例，辨識套件照 sha256 記住最近 3 份 PDF，沒記住回 `need_pdf`，網頁再連 `pdf` base64 一起送）——PDF 模式跟試卷辨識一樣：整頁 200 DPI 算圖、框裡 MFD／MFR＋OCR、`textlayer.page_layer` 換成文字層、`layout.block_lines` 照區塊類型（`type`：q 題目、opt 選項、其他文字）排成輸出的行（答案欄（ ）、選項拆開、折行接回），算式 `$…$` 換成 `\( \)`；空的算式（bare 沒有英數字）拿掉。`mode=math`：整塊直接 MFR（框只外加 2 px）。直書頁、掃描頁退回只用辨識。數學卷題目一塊約 1 秒（第一次載入模型 18 秒）。之後桌面版的辨識套件提供同樣的 API。測試腳本 scratchpad ocr_api_test.py、ocr_api_test2.py。
+- 送到文件整理改成連中繼檔一起送（postMessage 的 vtdoc 欄位），文件整理改完可以「存回中繼檔」。新分頁要在按下去的當下開（不然會被擋），剪貼簿也要在開分頁前開始寫（開了新分頁這頁就失去焦點），等「vitools-ready」的監聽在開分頁時就掛上。

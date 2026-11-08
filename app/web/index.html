@@ -3,19 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>豪點樂譜辨識</title>
+<title>vi-tools 辨識套件</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <main>
-<h1>豪點樂譜辨識</h1>
-<p>辨識 PDF 或圖檔裡的五線譜（輸出 MusicXML）或文字（輸出純文字）。全部在這台電腦上執行，不需要網路。</p>
+<h1>vi-tools 辨識套件</h1>
+<p>辨識 PDF 或圖檔裡的五線譜（輸出 MusicXML）、文字（輸出純文字），或數學試卷（題目、選項、算式）。全部在這台電腦上執行，不需要網路。</p>
+<p><a href="/exam/">試卷版面調整</a>：打開之前辨識過的試卷，對照原卷修改。</p>
 
 <form id="form">
   <fieldset>
     <legend>要辨識什麼</legend>
     <label><input type="radio" name="mode" value="score" checked> 樂譜：用 Audiveris 與 homr 辨識五線譜，交叉比對</label><br>
-    <label><input type="radio" name="mode" value="text"> 文字：辨識題目、選項等文字（掃描檔、照片也可以），譜例的位置標成［譜例］</label>
+    <label><input type="radio" name="mode" value="text"> 文字：辨識題目、選項等文字（掃描檔、照片也可以），譜例的位置標成［譜例］</label><br>
+    <label><input type="radio" name="mode" value="exam"> 試卷（數學）：題目、選項、算式（LaTeX），自動分題、標出附圖，之後可以在版面調整畫面修改</label>
   </fieldset>
 
   <h2>選擇檔案</h2>
@@ -42,6 +44,11 @@
     <p>文字層的字最準，但選項的圈號（例如 ❶）可能不見，也不會標出譜例的位置；不勾就一律辨識。</p>
   </div>
 
+  <div id="exam-opts" hidden>
+    <p><label><input type="checkbox" id="exam-text-layer" checked> PDF 有文字層（電子檔）時，中文、題號、選項直接讀文字層</label></p>
+    <p>文字層的中文最準；算式一律用模型辨識。掃描檔、圖檔沒有文字層，會自動改用辨識。每頁約 10 到 30 秒。</p>
+  </div>
+
   <p><button type="submit" id="go">開始辨識</button></p>
 </form>
 
@@ -54,6 +61,7 @@
 <section id="result" hidden aria-labelledby="h-result">
   <h2 id="h-result" tabindex="-1">結果</h2>
   <ul id="files"></ul>
+  <p id="exam-link" hidden><a id="exam-a" href="/exam/">開啟版面調整畫面</a>（對照原卷修改題目、選項、附圖與算式，改完會存回 試卷.txt）</p>
   <p><button type="button" id="open">開啟輸出資料夾</button></p>
   <div id="text-box" hidden>
     <h3><label for="text-out">辨識出的文字</label></h3>
@@ -64,6 +72,7 @@
   <pre id="report"></pre>
 </section>
 </main>
+<script src="progress.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

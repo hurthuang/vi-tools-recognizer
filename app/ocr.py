@@ -280,14 +280,21 @@ def text_layer(page):
     return '\n'.join(l.rstrip() for l in t.split('\n')).strip()
 
 
-def run(path, pages_spec='', use_text_layer=False, log=print):
-    """回傳 [(頁面名稱, 正文, 請對照原稿清單, 方式)]。"""
+def run(path, pages_spec='', use_text_layer=False, log=print, progress=None, cancel=None):
+    """回傳 [(頁面名稱, 正文, 請對照原稿清單, 方式)]。
+    progress(做完幾頁, 共幾頁)；cancel 是 threading.Event，設了就做完這頁停下來（只回傳做完的頁）。"""
     low = str(path).lower()
     results = []
+    progress = progress or (lambda *a: None)
     if low.endswith('.pdf'):
         import pypdfium2 as pdfium
         pdf = pdfium.PdfDocument(path)
-        for pi in prepare.parse_pages(pages_spec, len(pdf)):
+        todo = prepare.parse_pages(pages_spec, len(pdf))
+        for k, pi in enumerate(todo):
+            if cancel is not None and cancel.is_set():
+                log('已停止：做完 %d／%d 頁' % (k, len(todo)))
+                break
+            progress(k, len(todo))
             page = pdf[pi]
             label = '第 %d 頁' % (pi + 1)
             tl = text_layer(page) if use_text_layer else ''
@@ -299,6 +306,7 @@ def run(path, pages_spec='', use_text_layer=False, log=print):
             text, doubt = layout(ocr_image(img, extra_bands=score_images(page)))
             results.append((label, text, doubt, '文字辨識'))
             log('%s：文字辨識完成（%d 字）' % (label, len(text.replace('\n', ''))))
+        progress(len(results), len(todo))
     elif low.endswith(prepare.IMG_EXT):
         img = Image.open(path)
         img.load()
