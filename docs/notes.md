@@ -114,3 +114,9 @@ ef；vert_score.py 逐字比對。16 份國語卷（學用）**95.6%**（隨堂�
 - **辨識純文字（2026-11-08）**：`/api/ocr` 多 `mode=text`：`mathocr.raw_items(img, math=False)` 不跑 MFD（國語、社會卷 MFD 常把一般字當算式），PDF 有文字層照樣讀文字層；`GET /api/ocr` 的 `ocr` 清單多 `text`。
 - **給 vi-tools 的整份辨識（2026-11-08，`/api/doc`）**：vi-tools 版面整理直接開 PDF／圖檔時用。`POST /api/doc {name, data, pages}` → `{id}`（試卷模式的工作，`Job.from_vitools`；PDF 順便 `region.remember_pdf`，之後辨識一塊不用再送）；`GET /api/doc/<id>` 進度（state、done、total、eta、log 最後 5 行）；`GET /api/doc/<id>/vtdoc` 中繼檔（`review.export_vtdoc`，含原卷與位置，沒有 MathML）；`POST /api/doc/<id>/cancel`。CORS 白名單同 `/api/ocr`；`GET /api/ocr` 回 `doc: true` 讓 vi-tools 知道有這個功能。上限 200 MB（base64 JSON）。只收 PDF 與圖檔（Word 在 vi-tools 自己讀）。測試 scratchpad doc_api_test.py：鳳山 2b1 第 1 頁 26 秒、81 個位置、31 個算式；別的來源 403、docx 400。
 - 送到文件整理改成連中繼檔一起送（postMessage 的 vtdoc 欄位），文件整理改完可以「存回中繼檔」。新分頁要在按下去的當下開（不然會被擋），剪貼簿也要在開分頁前開始寫（開了新分頁這頁就失去焦點），等「vitools-ready」的監聽在開分頁時就掛上。
+
+## 算式整理：夾中文、被斷行切開（2026-11-08）
+
+- `mathocr.split_cjk`：MFR 把中間的中文一起辨識成一個算式（`2 \frac{1}{3} 是 4 \frac{1}{9}`），`edge_punct` 先拆開，中文變成文字 token（位置照字數比例分）。只看最外層，`\frac{甲}{乙}` 不拆；`\text{是}` 內容全中文也算文字。不拆的話點字裡後一個算式少了數字記號。
+- `vtdoc.join_tail`：原卷斷行把算式切開（`\sqrt{48\frac{8}{9}}` 換行 `<7`），算式後面緊接「< > = ≤ ≥ ≠＋數字或單一字母」收回算式；`inline` 對回辨識結果時完全相同的優先，其次辨識結果是開頭的。
+- vi-tools 那邊同規則（vtdoc.js `splitCjk`、`joinTail`、`splitMathEls`），nc 開舊的中繼檔時也會整理。

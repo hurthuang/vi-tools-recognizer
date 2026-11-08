@@ -22,6 +22,23 @@ FIG_MAX = 1400  # 附圖長邊最多幾像素（200 dpi 約 18 公分）
 SRC_MAX = 15 * 1024 * 1024  # 原始檔超過這個大小就改放縮小的頁面圖
 PAGE_MAX = 1600  # 改放頁面圖時長邊幾像素
 MATH = re.compile(r'\\\((.+?)\\\)')
+# 算式被原卷斷行切開：後半「<7」到了下一行、被當成文字（√48⅑ 換行 <7）。算式後面緊接「關係符號＋數字或單一字母」就收回算式
+# （vi-tools vtdoc.js 的 joinTail 同規則）
+TAIL = re.compile(r'\s*([<>=＜＞＝≤≥≠])\s*([-−]?(?:\d+(?:\.\d+)?|[A-Za-z]))(?![0-9A-Za-z.])')
+OP_TEX = {'＜': '<', '＞': '>', '＝': '=', '≤': r'\le', '≥': r'\ge', '≠': r'\neq'}
+
+
+def join_tail(text):
+    def one(m):
+        tex, rest = m.group(1), m.group(2)
+        while True:
+            t = TAIL.match(rest)
+            if not t:
+                break
+            tex += ' ' + OP_TEX.get(t.group(1), t.group(1)) + ' ' + t.group(2).replace('−', '-')
+            rest = rest[t.end():]
+        return '\\(' + tex + '\\)' + rest
+    return re.sub(r'\\\((.+?)\\\)([^\\]*)', one, text)
 LATIN = re.compile(r'[A-Za-z]')
 CJK = re.compile(r'[\u3400-\u9fff]')
 OPT_LABEL = re.compile(r'^\s*(?:[（(]\s*([A-EＡ-Ｅ])\s*[)）]|([①-⑳]))')
@@ -169,21 +186,24 @@ class Doc:
     def inline(self, text, pi=None, blk=None):
         """一行文字 → HTML：算式包成 vt-math（附原卷裁圖、信心），其他照字跳脫。"""
         out, k = [], 0
+        text = join_tail(text)
         for m in MATH.finditer(text):
             out.append(esc(text[k:m.start()]))
             tex = m.group(1).strip()
             a = f' data-tex="{attr(tex)}"'
             if pi is not None:
                 key = re.sub(r'\s', '', tex)
-                for c in self.math_items(pi, blk):
-                    if not c[2] and c[0] == key:
-                        c[2] = True
-                        it = c[1]
-                        a += f' data-conf="{it.get("score", 1):.2f}"' + self.box_attr(pi, it.get('box'))
-                        if self.images:
-                            im, _ = self.crop(pi, it['box'], pad=4, max_side=600)
-                            a += f' data-crop="{png_data(im)}"'
-                        break
+                # 完全相同的優先；收了斷行後半的算式（join_tail）跟辨識結果對不上，辨識結果是它的開頭也算
+                free = [c for c in self.math_items(pi, blk) if not c[2]]
+                c = next((c for c in free if c[0] == key), None) or \
+                    next((c for c in free if c[0] and key.startswith(c[0])), None)
+                if c:
+                    c[2] = True
+                    it = c[1]
+                    a += f' data-conf="{it.get("score", 1):.2f}"' + self.box_attr(pi, it.get('box'))
+                    if self.images:
+                        im, _ = self.crop(pi, it['box'], pad=4, max_side=600)
+                        a += f' data-crop="{png_data(im)}"'
             out.append(f'<span class="vt-math"{a}>{esc(m.group(0))}</span>')
             k = m.end()
         out.append(esc(text[k:]))

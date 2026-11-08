@@ -175,8 +175,92 @@ def split_punct(tex, before_cjk=True, after_cjk=True):
     return pre, t, post
 
 
+TEXT_CMD = re.compile(r'\\(?:text|mbox|mathrm|textrm|mathbf|textbf)\s*\{([^{}]*)\}')
+
+
+def split_cjk(tex):
+    """算式中間夾的中文移到算式外：[('math', '2 \\frac{1}{3}'), ('text', '是'), ('math', '4 \\frac{1}{9}')]。
+    只看最外層（大括號裡的中文，例如 \\frac{甲}{乙}，留在算式裡）；\\text{是} 這類裡面全是中文的也算文字。
+    沒有夾中文就回傳 [('math', tex)]。"""
+    # \text{中文} → 先換成中文本身（只換最外層、內容全是中文與空白的）
+    def plain(m):
+        return m.group(1) if m.group(1).strip() and all(CJK_CH.match(c) or c.isspace() for c in m.group(1)) else m.group(0)
+    out, buf, depth, i = [], '', 0, 0
+    src = tex
+    while i < len(src):
+        c = src[i]
+        if c == '\\' and depth == 0:
+            m = TEXT_CMD.match(src, i)
+            if m and plain(m) != m.group(0):
+                if buf.strip():
+                    out.append(['math', buf.strip()])
+                buf = ''
+                t = m.group(1).strip()
+                if out and out[-1][0] == 'text':
+                    out[-1][1] += t
+                else:
+                    out.append(['text', t])
+                i = m.end()
+                continue
+            # 指令整個照抄（\{ \} 不算括號）
+            m = re.match(r'\\(?:[A-Za-z]+|.)', src[i:])
+            buf += m.group(0)
+            i += len(m.group(0))
+            continue
+        if c == '\\':
+            m = re.match(r'\\(?:[A-Za-z]+|.)', src[i:])
+            buf += m.group(0)
+            i += len(m.group(0))
+            continue
+        if c == '{':
+            depth += 1
+        elif c == '}':
+            depth = max(0, depth - 1)
+        if depth == 0 and CJK_CH.match(c):
+            if buf.strip():
+                out.append(['math', buf.strip()])
+            buf = ''
+            if out and out[-1][0] == 'text':
+                out[-1][1] += c
+            else:
+                out.append(['text', c])
+            i += 1
+            continue
+        buf += c
+        i += 1
+    if buf.strip():
+        out.append(['math', buf.strip()])
+    if not any(k == 'text' for k, _ in out) or not any(k == 'math' for k, _ in out):
+        return [('math', tex)]
+    return [tuple(x) for x in out]
+
+
+def split_cjk_toks(toks):
+    """render_line 用：算式 token 中間夾中文的拆開，中文變成文字 token（位置照字數比例分）。"""
+    out = []
+    for t in toks:
+        parts = split_cjk(t['tex']) if t['kind'] == 'math' else None
+        if not parts or len(parts) == 1:
+            out.append(t)
+            continue
+        n = sum(len(v) for _, v in parts) or 1
+        x, w, k = t['x0'], t['x1'] - t['x0'], 0
+        for kind, v in parts:
+            x0 = x + w * k / n
+            k += len(v)
+            x1 = x + w * k / n
+            if kind == 'math':
+                out.append(dict(t, tex=v, x0=x0, x1=x1))
+            else:
+                step = (x1 - x0) / max(1, len(v))
+                for j, ch in enumerate(v):
+                    out.append(dict(kind='ch', ch=ch, x0=x0 + step * j, x1=x0 + step * (j + 1), score=t['score']))
+    toks[:] = out
+
+
 def edge_punct(toks):
     """render_line 用：算式頭尾的標點依前後文移到算式外。整串只有標點的（虛線被當成算式）拿掉。"""
+    split_cjk_toks(toks)
     out = []
     for i, t in enumerate(toks):
         if t['kind'] != 'math':
