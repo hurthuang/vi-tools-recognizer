@@ -110,10 +110,11 @@ def recognize(img):
     return arrange(raw_items(img), img.size[0])
 
 
-def raw_items(img):
-    """已經 clean 過的頁面圖 → 算式與文字行（含位置、逐字框、信心分數），還沒排版。"""
+def raw_items(img, math=True):
+    """已經 clean 過的頁面圖 → 算式與文字行（含位置、逐字框、信心分數），還沒排版。
+    math=False：只辨識文字（不找算式；國語、社會這類沒有算式的，MFD 常把一般字當成算式）。"""
     tf, ocr = models()
-    mf = tf.mfd(img.copy(), resized_shape=1600)
+    mf = tf.mfd(img.copy(), resized_shape=1600) if math else []
     crops, mboxes = [], []
     for m in mf:
         x0, y0, x1, y1 = box_of(m['box'])

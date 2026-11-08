@@ -3,8 +3,12 @@ r"""本機網頁服務：只聽 127.0.0.1，只接受同一來源的請求。
 GET  /                    操作頁面
 GET  /api/info            版本
 GET  /api/ocr             給 vi-tools 偵測（版面整理等頁面找本機的辨識套件）
-POST /api/ocr             JSON {mode: auto|math, image | pdf_sha256＋[pdf]＋page＋box} → {lines[]}、{tex, score} 或 {need_pdf}（exam/region.py）
-                          只有 /api/ocr 接受 vi-tools 網頁（線上版、桌面版、本機副本）的跨來源請求（CORS）
+POST /api/ocr             JSON {mode: auto|math|text, image | pdf_sha256＋[pdf]＋page＋box} → {lines[]}、{tex, score} 或 {need_pdf}（exam/region.py）
+POST /api/doc             JSON {name, data(base64), pages} → {id}：整份原卷辨識（試卷模式），給 vi-tools 版面整理開 PDF／圖
+GET  /api/doc/<id>        {state, done, total, eta, log[]}；state＝running／done／stopped／error
+GET  /api/doc/<id>/vtdoc  中繼檔（含原卷與位置；沒有 MathML，版面整理存檔時轉）
+POST /api/doc/<id>/cancel 做完這一頁就停
+                          只有 /api/ocr、/api/doc 接受 vi-tools 網頁（線上版、桌面版、本機副本）的跨來源請求（CORS）
 POST /api/jobs            JSON {name, data(base64), pages, refs:[{name, data}]} → {id}
 GET  /api/jobs/<id>       {state, log[], report, files[]}
 GET  /api/jobs/<id>/file?name=…   下載輸出檔
@@ -29,11 +33,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import job
+from prepare import IMG_EXT
 from main import VERSION
 
 # 可以呼叫 /api/ocr 的 vi-tools 網頁：線上版、桌面版（vitools.local）、本機的副本（127.0.0.1、localhost）
 VITOOLS_ORIGIN = re.compile(r'^(https://hurthuang\.github\.io|https://vitools\.local|http://(127\.0\.0\.1|localhost)(:\d+)?)$')
 OCR_MAX = 30 * 1024 * 1024
+DOC_MAX = 200 * 1024 * 1024    # 整份原卷（base64 JSON）
 
 WEB = Path(__file__).resolve().parent / 'web'
 EXAM_WEB = WEB / 'exam'
@@ -178,7 +184,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         u = urllib.parse.urlparse(self.path)
         o = self._vitools_origin()
-        if u.path.rstrip('/') == '/api/ocr' and o:
+        p = u.path.rstrip('/')
+        if o and (p == '/api/ocr' or p == '/api/doc' or p.startswith('/api/doc/')):
             self.send_response(204)
             for k, v in self._cors(o).items():
                 self.send_header(k, v)
@@ -194,7 +201,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, {'error': '不接受其他網站的請求'})
         extra = self._cors(o)
         if method == 'GET':
-            return self._send(200, {'name': 'vi-tools 辨識套件', 'version': VERSION, 'ocr': ['auto', 'math']}, extra=extra)
+            return self._send(200, {'name': 'vi-tools 辨識套件', 'version': VERSION, 'ocr': ['auto', 'math', 'text'], 'doc': True}, extra=extra)
         try:
             req = json.loads(body.decode('utf-8'))
             from exam import region
@@ -202,6 +209,50 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             traceback.print_exc()
             return self._send(400 if isinstance(e, ValueError) else 500, {'error': '%s: %s' % (type(e).__name__, e)}, extra=extra)
+
+    def _doc(self, method, rest, body=b''):
+        """vi-tools 版面整理開 PDF／圖：整份辨識成中繼檔。rest＝/api/doc 後面的路徑。"""
+        o = self._vitools_origin()
+        if self.headers.get('Origin') and not o:
+            return self._send(403, {'error': '不接受其他網站的請求'})
+        extra = self._cors(o)
+        try:
+            if method == 'POST' and not rest:
+                req = json.loads(body.decode('utf-8'))
+                name = os.path.basename(req.get('name') or 'input.pdf')
+                if not name.lower().endswith(('.pdf',) + IMG_EXT):
+                    return self._send(400, {'error': '只能辨識 PDF 或圖檔'}, extra=extra)
+                if name.lower().endswith('.pdf'):    # 之後「重新辨識一塊」不用再送一次 PDF
+                    from exam import region
+                    region.remember_pdf(base64.b64decode(req['data']))
+                j = start_job({'name': name, 'data': req['data'], 'pages': req.get('pages') or '', 'mode': 'exam',
+                               'textLayer': req.get('textLayer', True)})
+                j.from_vitools = True
+                return self._send(200, {'id': j.id}, extra=extra)
+            j = JOBS.get(rest[0]) if rest else None
+            if not j or not getattr(j, 'from_vitools', False):
+                return self._send(404, {'error': '找不到這個工作'}, extra=extra)
+            if method == 'GET' and len(rest) == 1:
+                s = j.status()
+                return self._send(200, {k: s[k] for k in ('state', 'done', 'total', 'elapsed', 'eta', 'stopping')} |
+                                  {'log': s['log'][-5:]}, extra=extra)
+            if method == 'GET' and rest[1:] == ['vtdoc']:
+                if j.state not in ('done', 'stopped') or not j.exam:
+                    return self._send(409, {'error': '還沒辨識完'}, extra=extra)
+                from exam import review
+                d = job.exam_dir(j.exam)
+                if not d:
+                    return self._send(404, {'error': '一頁都沒有辨識完'}, extra=extra)
+                return self._send(200, review.export_vtdoc(d, True, True), 'text/html; charset=utf-8', extra=extra)
+            if method == 'POST' and rest[1:] == ['cancel']:
+                j.cancel.set()
+                j.add('停止中：做完這一頁就停，做完的頁會保留。')
+                return self._send(200, {'ok': True}, extra=extra)
+        except Exception as e:  # noqa: BLE001
+            traceback.print_exc()
+            return self._send(400 if isinstance(e, (ValueError, KeyError)) else 500,
+                              {'error': '%s: %s' % (type(e).__name__, e)}, extra=extra)
+        return self._send(404, {'error': 'not found'}, extra=extra)
 
     def _send(self, code, body, ctype='application/json; charset=utf-8', extra=None):
         if isinstance(body, (dict, list)):
@@ -228,6 +279,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._exam_get(u, [urllib.parse.unquote(p) for p in parts[1:]])
         if parts == ['api', 'ocr']:
             return self._ocr('GET')
+        if parts[:2] == ['api', 'doc']:
+            return self._doc('GET', parts[2:])
         if parts == ['api', 'info']:
             return self._send(200, {'name': 'vi-tools 辨識套件', 'version': VERSION, 'engines': ['Audiveris', 'homr'],
                                     'modes': ['score', 'text', 'exam']})
@@ -255,6 +308,10 @@ class Handler(BaseHTTPRequestHandler):
             if n > OCR_MAX:
                 return self._send(413, {'error': '圖太大'}, extra=self._cors(self._vitools_origin()))
             return self._ocr('POST', self.rfile.read(n) if n else b'')
+        if parts[:2] == ['api', 'doc']:
+            if n > DOC_MAX:
+                return self._send(413, {'error': '檔案太大'}, extra=self._cors(self._vitools_origin()))
+            return self._doc('POST', parts[2:], self.rfile.read(n) if n else b'')
         if not self._origin_ok():
             return self._send(403, {'error': '不接受其他網站的請求'})
         body = self.rfile.read(n) if n else b''

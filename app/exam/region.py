@@ -64,11 +64,12 @@ def _math(img):
     return dict(mode='math', tex=mathocr.tidy(r['text']), score=round(float(r['score']), 3))
 
 
-def _auto_image(img, typ='p'):
+def _auto_image(img, typ='p', math=True):
     with LOCK:
-        items = mathocr.raw_items(img)
+        items = mathocr.raw_items(img, math)
     ms = [it['score'] for it in items if it['kind'] == 'math']
-    return dict(mode='auto', lines=_lines(items, typ), math_score=round(min(ms), 3) if ms else None, text_layer=False)
+    return dict(mode='auto' if math else 'text', lines=_lines(items, typ), math_score=round(min(ms), 3) if ms else None,
+                text_layer=False)
 
 
 def remember_pdf(data):
@@ -92,7 +93,7 @@ def recognize(req):
             _pdfs.move_to_end(sha)
         return _from_pdf(_pdfs[sha], int(req.get('page') or 1), req.get('box'), mode, req.get('type') or 'p')
     img = mathocr.clean(decode(req.get('image')))
-    return _math(img) if mode == 'math' else _auto_image(img, req.get('type') or 'p')
+    return _math(img) if mode == 'math' else _auto_image(img, req.get('type') or 'p', mode != 'text')
 
 
 def _from_pdf(data, n, box, mode, typ):
@@ -115,8 +116,9 @@ def _from_pdf(data, n, box, mode, typ):
     crop = page.crop((x0, y0, x1, y1))
     if mode == 'math':
         return _math(crop)
+    use_math = mode != 'text'   # text：只辨識文字，不找算式
     with LOCK:
-        items = mathocr.raw_items(crop)
+        items = mathocr.raw_items(crop, use_math)
     for it in items:   # 換成整頁的座標，才能跟文字層對
         b = it['box']
         it['box'] = (b[0] + x0, b[1] + y0, b[2] + x0, b[3] + y0)
@@ -125,12 +127,12 @@ def _from_pdf(data, n, box, mode, typ):
     chars = textlayer.chars_of(pg, mathocr.DPI)
     if len(chars) < 20 or vertical.chars_vertical(chars):
         # 掃描頁（沒有文字層）、直書頁：只用辨識
-        r = _auto_image(crop, typ)
+        r = _auto_image(crop, typ, use_math)
         r['text_layer'] = False
         return r
     tl = textlayer.page_layer(pg, mathocr.DPI, items)
     if tl is None:
-        return _auto_image(crop, typ)
+        return _auto_image(crop, typ, use_math)
 
     def inside(b):
         cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
@@ -143,4 +145,5 @@ def _from_pdf(data, n, box, mode, typ):
     for it in out:
         it.setdefault('iso', False)
     ms = [it['score'] for it in out if it['kind'] == 'math']
-    return dict(mode='auto', lines=_lines(out, typ), math_score=round(min(ms), 3) if ms else None, text_layer=True)
+    return dict(mode='auto' if use_math else 'text', lines=_lines(out, typ), math_score=round(min(ms), 3) if ms else None,
+                text_layer=True)
