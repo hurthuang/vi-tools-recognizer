@@ -307,17 +307,17 @@ function scrollToBlock(id) {
   w.scrollTo({ top: Math.max(0, b.box[1] * scale - 60), behavior: 'smooth' });
 }
 
-// ---------- 送到 vi-tools 文件整理 ----------
-// 打開文件整理（網址帶 #from=haodian），等它回「vitools-ready」再用 postMessage 送文字。
+// ---------- 送到 vi-tools 朗讀與音檔 ----------
+// 打開朗讀與音檔（網址帶 #from=haodian），等它回「vitools-ready」再用 postMessage 送文字。
 // vi-tools 的位置預設是線上版；用本機的副本時在主控台設 localStorage['haodian.vitools'] = 'http://127.0.0.1:8000/'。
 const VITOOLS = () => localStorage.getItem('haodian.vitools') || 'https://hurthuang.github.io/vi-tools/';
 
 async function sendToVitools() {
   if (!data || !data.text.trim()) { status('還沒有文字可以送'); return; }
   const text = data.text, name = exam.replace(/^\d{8}-\d{6}_/, '');
-  // 新分頁要在按下去的當下開，不然會被瀏覽器擋；中繼檔、剪貼簿在等文件整理準備好的時候做
+  // 新分頁要在按下去的當下開，不然會被瀏覽器擋；中繼檔、剪貼簿在等朗讀與音檔準備好的時候做
   const url = new URL('pdf-to-accessible.html', VITOOLS()).href + '#from=haodian';
-  // 剪貼簿要在這一頁還有焦點時寫（開了新分頁就失去焦點）；等文件整理回應的監聽也要在開分頁的當下就掛上
+  // 剪貼簿要在這一頁還有焦點時寫（開了新分頁就失去焦點）；等朗讀與音檔回應的監聽也要在開分頁的當下就掛上
   const clipP = navigator.clipboard ? navigator.clipboard.writeText(text).then(() => true, () => false) : Promise.resolve(false);
   const w = window.open(url, '_blank');
   const vtP = buildVtdoc().then(r => r.html).catch(() => null);  // 中繼檔做不出來就只送文字
@@ -335,12 +335,12 @@ async function sendToVitools() {
     window.addEventListener('message', on);
   });
   const copied = await Promise.race([clipP, new Promise(r => setTimeout(() => r(false), 3000))]);
-  const fallback = copied ? '文字已複製到剪貼簿，可以在文件整理按 Ctrl＋V 貼上。' : '請按「輸出」→「複製全部文字」再貼到文件整理。';
+  const fallback = copied ? '文字已複製到剪貼簿，可以在朗讀與音檔按 Ctrl＋V 貼上。' : '請按「輸出」→「複製全部文字」再貼到朗讀與音檔。';
   if (!w) { status('瀏覽器擋住了新分頁。' + fallback); return; }
-  status('打開文件整理中…');
+  status('打開朗讀與音檔中…');
   const ok = await okP;
-  status(ok ? `已送到文件整理（新分頁），標成「已排版」：可以在那邊改字、朗讀檢查，改完按「存回中繼檔」。`
-    : `文件整理沒有回應（可能沒有網路，或文件整理還是舊版）。${fallback}`);
+  status(ok ? `已送到朗讀與音檔（新分頁），標成「已排版」：可以在那邊改字、朗讀檢查，改完按「存回中繼檔」。`
+    : `朗讀與音檔沒有回應（可能沒有網路，或朗讀與音檔還是舊版）。${fallback}`);
 }
 
 // ---------- 中繼檔（.vtdoc.html） ----------
