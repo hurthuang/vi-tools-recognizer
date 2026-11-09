@@ -11,6 +11,7 @@
 """
 import shutil
 import sys
+import re
 import zipfile
 from pathlib import Path
 
@@ -64,7 +65,9 @@ def main():
     (DIST / '輸出').mkdir(exist_ok=True)
     print('完成：', DIST)
     if '--zip' in sys.argv:
-        z = ROOT / 'dist' / (NAME + '.zip')
+        # GitHub Release 的附檔名稱會去掉中文，zip 用英文名稱（解開來的資料夾還是 vi-tools辨識套件）
+        ver = re.search(r"^VERSION = '([^']+)'", (ROOT / 'app' / 'main.py').read_text(encoding='utf-8'), re.M).group(1)
+        z = ROOT / 'dist' / ('vi-tools-recognizer-%s-portable.zip' % ver)
         print('壓縮中…')
         with zipfile.ZipFile(z, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
             for p in DIST.rglob('*'):

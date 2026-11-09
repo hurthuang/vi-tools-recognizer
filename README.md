@@ -20,7 +20,7 @@
 |---|---|
 | `app/` | 主程式：`main.py`（命令列／啟動網頁）、`server.py`（只聽 127.0.0.1 的本機服務，含給 vi-tools 的 `/api/ocr`、`/api/doc`）、`job.py`（一次辨識）、`ocr.py`（文字辨識）、`exam/`（試卷：版面、文字層、算式、直書、中繼檔）、`prepare.py`、`engines.py`、`compare.py`（樂譜）、`web/`（操作頁面） |
 | `dist-files/` | 放進可攜版的啟動檔、說明、授權 |
-| `tools/build.py` | 組出 `dist/vi-tools辨識套件/` 與 zip |
+| `tools/build.py` | 組出 `dist/vi-tools辨識套件/` 與 zip（`vi-tools-recognizer-版本-portable.zip`） |
 | `build/`（不進版控） | 嵌入式 Python zip、`pip install --target` 的套件（含 homr 模型）、Audiveris 解開的資料夾、算式模型 |
 | `docs/notes.md` | 開發筆記 |
 
