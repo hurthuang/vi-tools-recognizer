@@ -127,7 +127,7 @@ def raw_items(img, math=True):
         items.append(dict(box=(x0, y0, x1, y1), tex=tidy(r['text']), raw=r['text'], kind='math',
                           score=r['score'], iso=typ == 'isolated'))
         masked[max(0, int(y0) - 1):int(y1) + 2, max(0, int(x0) - 1):int(x1) + 2] = 255
-    o = ocr(masked, use_det=True, use_cls=True, use_rec=True, return_word_box=True)
+    o = ocr(masked, use_det=True, use_cls=False, use_rec=True, return_word_box=True)   # 不做方向分類（見 ocr.py）
     if o.boxes is not None:
         for b, t, s, words in zip(o.boxes, o.txts, o.scores, o.word_results):
             if not t.strip():

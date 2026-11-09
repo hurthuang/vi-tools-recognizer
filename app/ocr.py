@@ -79,7 +79,9 @@ def ocr_image(img, skip_scores=True, extra_bands=()):
     gray = clean(img)
     bands = merge_bands(list(score_bands(gray)) + [list(b) for b in extra_bands]) if skip_scores else []
     arr = np.stack([gray] * 3, axis=-1)
-    r = engine()(arr, use_det=True, use_cls=True, use_rec=True)  # 參數會留在引擎上，每次都要明講
+    # 不做方向分類：它會把正常的行誤判成顛倒、轉過去認成亂碼（19 份試卷第 1 頁：中文召回 96.5% → 關掉 99.1%，
+    # 2026-11-08 試驗，E:\Project\agy-work\20261108-ocr-web）；整頁顛倒的掃描檔要另外轉正
+    r = engine()(arr, use_det=True, use_cls=False, use_rec=True)  # 參數會留在引擎上，每次都要明講
     out = []
     if r.boxes is None or r.txts is None:
         return out
