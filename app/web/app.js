@@ -25,6 +25,14 @@
   };
   document.querySelectorAll('input[name=mode]').forEach((r) => r.addEventListener('change', syncMode));
   syncMode();
+  // 試卷版（沒有 Audiveris、homr）：樂譜不能選，預設改成試卷
+  fetch('/api/info').then((r) => r.json()).then((info) => {
+    if (info.music !== false) return;
+    const sc = document.querySelector('input[name=mode][value=score]');
+    sc.disabled = true;
+    sc.parentElement.insertAdjacentText('beforeend', '（試卷版沒有樂譜辨識；要辨識樂譜請下載完整版）');
+    if (sc.checked) { document.querySelector('input[name=mode][value=exam]').checked = true; syncMode(); }
+  }).catch(() => {});
 
   $('form').addEventListener('submit', async (e) => {
     e.preventDefault();

@@ -132,3 +132,8 @@ python tools\build.py --zip
 - README、說明.txt 改成給老師看（試卷優先、樂譜放後面；Windows SmartScreen 放行、開機自動開、隱私）；repo 加 `LICENSE`（GNU 官方 AGPL-3.0 原文），`dist-files/授權/homr_LICENSE.txt` 原本的 &lt; &gt; 亂碼一起換成官方原文。
 - 記憶體：剛開約 40 MB（工作集），辨識試卷後約 1 GB（模型載入後不釋放）。
 - 第一版一包完整版（約 528 MB）；之後桌面版（0.5.0）會在同一資料夾找到辨識套件、用到才在背景啟動。
+
+## 0.4.1（2026-11-10）
+
+- `app/word.py`＋`POST /api/word`：用這台電腦的 Word（PowerShell COM，不顯示、唯讀開、給假密碼避免卡在密碼框）另存 PDF（17），.doc 另外存 .docx（16）；同一時間只轉一個。`GET /api/ocr` 多回 `word`（登錄檔有沒有 Word.Application）、`music`。實測 docx→PDF 7～9 秒、.doc 6～7 秒，PDF 頁數跟原本的一樣。
+- 試卷版：`tools/build.py --exam`（dist\exam\，不放 Audiveris、homr，zip 約 300 MB）。`engines.music_available()`；試卷版選樂譜回錯誤，首頁樂譜選項變灰。

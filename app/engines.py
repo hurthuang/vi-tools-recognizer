@@ -16,6 +16,12 @@ AUDIVERIS = ROOT / 'runtime' / 'audiveris' / 'Audiveris.exe'
 NO_WINDOW = 0x08000000 if os.name == 'nt' else 0
 
 
+def music_available():
+    '''樂譜辨識的工具在不在（試卷版沒有 Audiveris、homr）。'''
+    import importlib.util
+    return AUDIVERIS.exists() and importlib.util.find_spec('homr') is not None
+
+
 def _run(cmd, log_path, timeout, env=None):
     with open(log_path, 'w', encoding='utf-8', errors='replace') as lf:
         p = subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT, timeout=timeout, env=env,

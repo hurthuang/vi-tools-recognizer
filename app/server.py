@@ -8,6 +8,7 @@ POST /api/doc             JSON {name, data(base64), pages} → {id}：整份原�
 GET  /api/doc/<id>        {state, done, total, eta, log[]}；state＝running／done／stopped／error
 GET  /api/doc/<id>/vtdoc  中繼檔（含原卷與位置；沒有 MathML，版面整理存檔時轉）
 POST /api/doc/<id>/cancel 做完這一頁就停
+POST /api/word            JSON {name, data(base64)} → {pdf, docx}（base64）：用這台電腦的 Word 把 .doc／.docx 另存 PDF（0.4.1）
                           只有 /api/ocr、/api/doc 接受 vi-tools 網頁（線上版、桌面版、本機副本）的跨來源請求（CORS）
 POST /api/jobs            JSON {name, data(base64), pages, refs:[{name, data}]} → {id}
 GET  /api/jobs/<id>       {state, log[], report, files[]}
@@ -98,6 +99,10 @@ class Job:
 
 
 def start_job(payload):
+    if payload.get('mode', 'score') == 'score':
+        import engines
+        if not engines.music_available():
+            raise ValueError('這個版本是試卷版，沒有樂譜辨識。要辨識樂譜請下載完整版（vi-tools-recognizer-…-portable.zip）。')
     j = Job()
     JOBS[j.id] = j
     name = os.path.basename(payload.get('name') or 'input.pdf')
@@ -185,7 +190,7 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         o = self._vitools_origin()
         p = u.path.rstrip('/')
-        if o and (p == '/api/ocr' or p == '/api/doc' or p.startswith('/api/doc/')):
+        if o and (p in ('/api/ocr', '/api/doc', '/api/word') or p.startswith('/api/doc/')):
             self.send_response(204)
             for k, v in self._cors(o).items():
                 self.send_header(k, v)
@@ -201,7 +206,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(403, {'error': '不接受其他網站的請求'})
         extra = self._cors(o)
         if method == 'GET':
-            return self._send(200, {'name': 'vi-tools 辨識套件', 'version': VERSION, 'ocr': ['auto', 'math', 'text'], 'doc': True}, extra=extra)
+            import engines
+            import word
+            return self._send(200, {'name': 'vi-tools 辨識套件', 'version': VERSION, 'ocr': ['auto', 'math', 'text'], 'doc': True,
+                                    'word': word.available(), 'music': engines.music_available()}, extra=extra)
         try:
             req = json.loads(body.decode('utf-8'))
             from exam import region
@@ -254,6 +262,21 @@ class Handler(BaseHTTPRequestHandler):
                               {'error': '%s: %s' % (type(e).__name__, e)}, extra=extra)
         return self._send(404, {'error': 'not found'}, extra=extra)
 
+    def _word(self, body):
+        '''vi-tools 版面整理開 Word 檔：用這台電腦的 Word 另存 PDF（和 .docx）當原卷。'''
+        o = self._vitools_origin()
+        if self.headers.get('Origin') and not o:
+            return self._send(403, {'error': '不接受其他網站的請求'})
+        extra = self._cors(o)
+        try:
+            req = json.loads(body.decode('utf-8'))
+            import word
+            r = word.convert(base64.b64decode(req['data']), os.path.basename(req.get('name') or 'input.docx'))
+            return self._send(200, {k: base64.b64encode(v).decode('ascii') for k, v in r.items()}, extra=extra)
+        except Exception as e:  # noqa: BLE001
+            traceback.print_exc()
+            return self._send(400 if isinstance(e, (ValueError, KeyError, RuntimeError)) else 500, {'error': str(e)}, extra=extra)
+
     def _send(self, code, body, ctype='application/json; charset=utf-8', extra=None):
         if isinstance(body, (dict, list)):
             body = json.dumps(body, ensure_ascii=False).encode('utf-8')
@@ -282,7 +305,8 @@ class Handler(BaseHTTPRequestHandler):
         if parts[:2] == ['api', 'doc']:
             return self._doc('GET', parts[2:])
         if parts == ['api', 'info']:
-            return self._send(200, {'name': 'vi-tools 辨識套件', 'version': VERSION, 'engines': ['Audiveris', 'homr'],
+            import engines
+            return self._send(200, {'name': 'vi-tools 辨識套件', 'version': VERSION, 'engines': ['Audiveris', 'homr'], 'music': engines.music_available(),
                                     'modes': ['score', 'text', 'exam']})
         if len(parts) >= 3 and parts[:2] == ['api', 'jobs']:
             j = JOBS.get(parts[2])
@@ -312,6 +336,10 @@ class Handler(BaseHTTPRequestHandler):
             if n > DOC_MAX:
                 return self._send(413, {'error': '檔案太大'}, extra=self._cors(self._vitools_origin()))
             return self._doc('POST', parts[2:], self.rfile.read(n) if n else b'')
+        if parts == ['api', 'word']:
+            if n > DOC_MAX:
+                return self._send(413, {'error': '檔案太大'}, extra=self._cors(self._vitools_origin()))
+            return self._word(self.rfile.read(n) if n else b'')
         if not self._origin_ok():
             return self._send(403, {'error': '不接受其他網站的請求'})
         body = self.rfile.read(n) if n else b''

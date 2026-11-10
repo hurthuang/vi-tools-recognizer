@@ -7,7 +7,9 @@
   audiveris\\                          Audiveris 5.11.0 Console 版 msi 用 msiexec /a 解開後的 Audiveris 資料夾
   models\\mfd、models\\mfr              試卷辨識的算式模型（Pix2Text mfd-1.5-onnx、mfr-1.5-onnx，從 %APPDATA%\\pix2text\\1.1 複製）
   site-packages 另外要有 tokenizers   試卷辨識的 MFR 用（不需要 huggingface_hub）
-用法：python tools\\build.py [--zip]
+用法：python tools\\build.py [--zip] [--exam]
+  --exam：試卷版（不含樂譜辨識的 Audiveris、homr，約 300 MB），組在 dist\\exam\\vi-tools辨識套件\\，
+          zip 是 vi-tools-recognizer-版本-exam-portable.zip；不加是完整版
 """
 import shutil
 import sys
@@ -18,7 +20,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 B = ROOT / 'build'
 NAME = 'vi-tools辨識套件'
-DIST = ROOT / 'dist' / NAME
+EXAM = '--exam' in sys.argv
+DIST = ROOT / 'dist' / ('exam' if EXAM else '') / NAME
 PY_ZIP = B / 'dl' / 'python-3.12.10-embed-amd64.zip'
 
 
@@ -29,7 +32,7 @@ def copytree(src, dst):
 
 
 def main():
-    for need in (PY_ZIP, B / 'site-packages', B / 'audiveris' / 'Audiveris.exe', B / 'site-packages' / 'tokenizers',
+    for need in (PY_ZIP, B / 'site-packages', *(() if EXAM else (B / 'audiveris' / 'Audiveris.exe',)), B / 'site-packages' / 'tokenizers',
                  B / 'models' / 'mfd' / 'pix2text-mfd-1.5.onnx', B / 'models' / 'mfr' / 'decoder_model.onnx'):
         if not need.exists():
             sys.exit('缺少 ' + str(need))
@@ -45,9 +48,11 @@ def main():
     sp = py / 'Lib' / 'site-packages'
     if not sp.exists():
         print('複製 site-packages…')
-        shutil.copytree(B / 'site-packages', sp, ignore=shutil.ignore_patterns('__pycache__', '*.pyc', 'bin'))
+        # 試卷版：樂譜辨識的 homr（含模型約 150 MB）不放
+        ign = ('__pycache__', '*.pyc', 'bin') + (('homr', 'homr-*') if EXAM else ())
+        shutil.copytree(B / 'site-packages', sp, ignore=shutil.ignore_patterns(*ign))
     au = DIST / 'runtime' / 'audiveris'
-    if not (au / 'Audiveris.exe').exists():
+    if not EXAM and not (au / 'Audiveris.exe').exists():
         print('複製 Audiveris…')
         copytree(B / 'audiveris', au)
     if not (sp / 'tokenizers').exists():
@@ -67,7 +72,7 @@ def main():
     if '--zip' in sys.argv:
         # GitHub Release 的附檔名稱會去掉中文，zip 用英文名稱（解開來的資料夾還是 vi-tools辨識套件）
         ver = re.search(r"^VERSION = '([^']+)'", (ROOT / 'app' / 'main.py').read_text(encoding='utf-8'), re.M).group(1)
-        z = ROOT / 'dist' / ('vi-tools-recognizer-%s-portable.zip' % ver)
+        z = ROOT / 'dist' / ('vi-tools-recognizer-%s-%sportable.zip' % (ver, 'exam-' if EXAM else ''))
         print('壓縮中…')
         with zipfile.ZipFile(z, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
             for p in DIST.rglob('*'):

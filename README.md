@@ -3,8 +3,8 @@
 [vi-tools](https://hurthuang.github.io/vi-tools/)（視障教學工具）的選裝套件：在自己的電腦上把試卷、講義的 PDF 或圖檔辨識成文字與算式（LaTeX），也可以辨識五線譜（MusicXML）。開著它時，vi-tools「版面整理」可以整頁辨識算式、讀掃描檔，結果存成中繼檔，再接數學點字、文字轉點字、朗讀與音檔、觸圖製作。
 
 - 全部在本機執行，試卷不會傳到網路上；不需要網路，闈場也能用。
-- Windows 10／11 64 位元的可攜版：到 [Releases](https://github.com/hurthuang/vi-tools-recognizer/releases) 下載 zip，解壓縮後雙擊 `vi-tools辨識套件.cmd`。使用說明在 zip 裡的 `說明.txt`（原檔 `dist-files/說明.txt`）。
-- 只聽 127.0.0.1，只接受 vi-tools 網頁的來源呼叫 `/api/ocr`、`/api/doc`。
+- Windows 10／11 64 位元的可攜版：到 [Releases](https://github.com/hurthuang/vi-tools-recognizer/releases) 下載 zip，解壓縮後雙擊 `vi-tools辨識套件.cmd`。兩種：試卷版（`…-exam-portable.zip`，約 300 MB，不含樂譜辨識）、完整版（`…-portable.zip`，約 530 MB）。使用說明在 zip 裡的 `說明.txt`（原檔 `dist-files/說明.txt`）。
+- 只聽 127.0.0.1，只接受 vi-tools 網頁的來源呼叫 `/api/ocr`、`/api/doc`、`/api/word`（用這台電腦的 Word 把 .doc／.docx 另存 PDF，0.4.1）。
 
 ## 辨識用的工具
 
