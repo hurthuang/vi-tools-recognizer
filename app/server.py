@@ -9,7 +9,9 @@ GET  /api/doc/<id>        {state, done, total, eta, log[]}；state＝running／d
 GET  /api/doc/<id>/vtdoc  中繼檔（含原卷與位置；沒有 MathML，版面整理存檔時轉）
 POST /api/doc/<id>/cancel 做完這一頁就停
 POST /api/word            JSON {name, data(base64)} → {pdf, docx}（base64）：用這台電腦的 Word 把 .doc／.docx 另存 PDF（0.4.1）
-                          只有 /api/ocr、/api/doc 接受 vi-tools 網頁（線上版、桌面版、本機副本）的跨來源請求（CORS）
+POST /api/omr             JSON {image(base64／dataURL), engines?} → {results:[{engine, musicxml | error, sec}], spacing, scale, sec}：
+                          辨識一塊譜例（Audiveris、homr 一起跑），給 vi-tools 文字辨識頁的樂譜模式（0.4.2，omr_region.py）；試卷版沒有 → 409
+                          只有 /api/ocr、/api/doc、/api/word、/api/omr 接受 vi-tools 網頁（線上版、桌面版、本機副本）的跨來源請求（CORS）
 POST /api/jobs            JSON {name, data(base64), pages, refs:[{name, data}]} → {id}
 GET  /api/jobs/<id>       {state, log[], report, files[]}
 GET  /api/jobs/<id>/file?name=…   下載輸出檔
@@ -190,7 +192,7 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         o = self._vitools_origin()
         p = u.path.rstrip('/')
-        if o and (p in ('/api/ocr', '/api/doc', '/api/word') or p.startswith('/api/doc/')):
+        if o and (p in ('/api/ocr', '/api/doc', '/api/word', '/api/omr') or p.startswith('/api/doc/')):
             self.send_response(204)
             for k, v in self._cors(o).items():
                 self.send_header(k, v)
@@ -209,11 +211,27 @@ class Handler(BaseHTTPRequestHandler):
             import engines
             import word
             return self._send(200, {'name': 'vi-tools 辨識套件', 'version': VERSION, 'ocr': ['auto', 'math', 'text'], 'doc': True,
-                                    'word': word.available(), 'music': engines.music_available()}, extra=extra)
+                                    'word': word.available(), 'music': engines.music_available(), 'omr': engines.music_available()}, extra=extra)
         try:
             req = json.loads(body.decode('utf-8'))
             from exam import region
             return self._send(200, region.recognize(req), extra=extra)
+        except Exception as e:  # noqa: BLE001
+            traceback.print_exc()
+            return self._send(400 if isinstance(e, ValueError) else 500, {'error': '%s: %s' % (type(e).__name__, e)}, extra=extra)
+
+    def _omr(self, body):
+        """vi-tools 的樂譜辨識：POST /api/omr {image} → 兩個引擎的 MusicXML（omr_region.py）。"""
+        o = self._vitools_origin()
+        if self.headers.get('Origin') and not o:
+            return self._send(403, {'error': '不接受其他網站的請求'})
+        extra = self._cors(o)
+        import engines
+        if not engines.music_available():
+            return self._send(409, {'error': '這是試卷版，沒有樂譜辨識（要用完整版的辨識套件）'}, extra=extra)
+        try:
+            import omr_region
+            return self._send(200, omr_region.recognize(json.loads(body.decode('utf-8'))), extra=extra)
         except Exception as e:  # noqa: BLE001
             traceback.print_exc()
             return self._send(400 if isinstance(e, ValueError) else 500, {'error': '%s: %s' % (type(e).__name__, e)}, extra=extra)
@@ -336,6 +354,10 @@ class Handler(BaseHTTPRequestHandler):
             if n > DOC_MAX:
                 return self._send(413, {'error': '檔案太大'}, extra=self._cors(self._vitools_origin()))
             return self._doc('POST', parts[2:], self.rfile.read(n) if n else b'')
+        if parts == ['api', 'omr']:
+            if n > OCR_MAX:
+                return self._send(413, {'error': '圖太大'}, extra=self._cors(self._vitools_origin()))
+            return self._omr(self.rfile.read(n) if n else b'')
         if parts == ['api', 'word']:
             if n > DOC_MAX:
                 return self._send(413, {'error': '檔案太大'}, extra=self._cors(self._vitools_origin()))

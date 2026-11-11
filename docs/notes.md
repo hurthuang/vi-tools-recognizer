@@ -137,3 +137,11 @@ python tools\build.py --zip
 
 - `app/word.py`＋`POST /api/word`：用這台電腦的 Word（PowerShell COM，不顯示、唯讀開、給假密碼避免卡在密碼框）另存 PDF（17），.doc 另外存 .docx（16）；同一時間只轉一個。`GET /api/ocr` 多回 `word`（登錄檔有沒有 Word.Application）、`music`。實測 docx→PDF 7～9 秒、.doc 6～7 秒，PDF 頁數跟原本的一樣。
 - 試卷版：`tools/build.py --exam`（dist\exam\，不放 Audiveris、homr，zip 約 300 MB）。`engines.music_available()`；試卷版選樂譜回錯誤，首頁樂譜選項變灰。
+
+## 辨識一塊譜例 `/api/omr`（2026-11-11，分支 `omr-api`，預定 0.4.2）
+
+- 給 vi-tools 文字辨識頁（ocr.html）的「樂譜」模式：老師截一段譜例，網頁送來，辨識成 MusicXML 再送到音樂點字。以後點字樂譜、版面整理的譜例也可以用。
+- `app/omr_region.py`：`POST /api/omr {image（base64／dataURL）, engines?}` → `{results:[{engine:'homr'|'audiveris', musicxml | error, sec}], spacing, scale, sec}`。先估譜線間距（長度 ≥ 寬 30% 的細橫線、五條等距），放大到線距約 20 像素（最多 4 倍；找不到譜線就把短邊放大到 600）；Audiveris、homr 各一個行程同時跑（各 300 秒逾時），同一時間只辨識一塊（`_LOCK`）。透明的截圖底色當白色。
+- `server.py`：路由、CORS 白名單同 `/api/ocr`；試卷版（沒有 Audiveris、homr）回 409「這是試卷版，沒有樂譜辨識」；`GET /api/ocr` 多回 `omr`（＝`music_available()`），網頁看這個才出現「樂譜」。
+- 圖的大小限制（2026-11-11，codex 程式碼審查發現）：解碼前先看尺寸，超過 4 千萬像素回 400「圖太大，請裁小一點」（檔案小、尺寸大的圖解碼後會吃光記憶體）；照線距放大後長邊最多 12,000 像素；壞掉的 base64、不是圖片都回 400。
+- 實測（音樂班試題譜例縮成截圖大小）：115 單行旋律 1206×132（線距 9.5 → 放大 2.1 倍）6 秒，兩個引擎音高大致對，homr 認成 4/8、Audiveris 2/4；114 鋼琴譜 844×274（線距 8 → 2.5 倍）10 秒，homr 少很多音、Audiveris 讀到的比較多。仍然只是草稿（方框當小節線、調號常漏）。
