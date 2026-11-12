@@ -6,7 +6,7 @@
 import argparse
 import sys
 
-VERSION = '0.4.1'
+VERSION = '0.4.2'
 
 
 def cli(argv):

@@ -138,7 +138,7 @@ python tools\build.py --zip
 - `app/word.py`＋`POST /api/word`：用這台電腦的 Word（PowerShell COM，不顯示、唯讀開、給假密碼避免卡在密碼框）另存 PDF（17），.doc 另外存 .docx（16）；同一時間只轉一個。`GET /api/ocr` 多回 `word`（登錄檔有沒有 Word.Application）、`music`。實測 docx→PDF 7～9 秒、.doc 6～7 秒，PDF 頁數跟原本的一樣。
 - 試卷版：`tools/build.py --exam`（dist\exam\，不放 Audiveris、homr，zip 約 300 MB）。`engines.music_available()`；試卷版選樂譜回錯誤，首頁樂譜選項變灰。
 
-## 辨識一塊譜例 `/api/omr`（2026-11-11，分支 `omr-api`，預定 0.4.2）
+## 0.4.2：辨識一塊譜例 `/api/omr`（2026-11-11 做好，11-12 發佈）
 
 - 給 vi-tools 文字辨識頁（ocr.html）的「樂譜」模式：老師截一段譜例，網頁送來，辨識成 MusicXML 再送到音樂點字。以後點字樂譜、版面整理的譜例也可以用。
 - `app/omr_region.py`：`POST /api/omr {image（base64／dataURL）, engines?}` → `{results:[{engine:'homr'|'audiveris', musicxml | error, sec}], spacing, scale, sec}`。先估譜線間距（長度 ≥ 寬 30% 的細橫線、五條等距），放大到線距約 20 像素（最多 4 倍；找不到譜線就把短邊放大到 600）；Audiveris、homr 各一個行程同時跑（各 300 秒逾時），同一時間只辨識一塊（`_LOCK`）。透明的截圖底色當白色。
