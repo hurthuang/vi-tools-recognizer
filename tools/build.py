@@ -10,7 +10,11 @@
 用法：python tools\\build.py [--zip] [--exam]
   --exam：試卷版（不含樂譜辨識的 Audiveris、homr，約 300 MB），組在 dist\\exam\\vi-tools辨識套件\\，
           zip 是 vi-tools-recognizer-版本-exam-portable.zip；不加是完整版
+  --zip 另外產生只有 app\\ 的 vi-tools-recognizer-版本-app.zip 與 update.json（辨識套件自己更新用，app\\update.py）。
+  Release 要附上這兩個檔；試卷版、完整版的 app\\ 一樣，只要一份。
 """
+import hashlib
+import json
 import shutil
 import sys
 import re
@@ -23,6 +27,9 @@ NAME = 'vi-tools辨識套件'
 EXAM = '--exam' in sys.argv
 DIST = ROOT / 'dist' / ('exam' if EXAM else '') / NAME
 PY_ZIP = B / 'dl' / 'python-3.12.10-embed-amd64.zip'
+# 執行環境（runtime\python 的套件、runtime\models、Audiveris）的版本：加了套件、換了模型就加 1。
+# 裝的比新版要的舊 → 辨識套件不能只換 app\，請使用者下載整包（app\update.py）
+RUNTIME = 1
 
 
 def copytree(src, dst):
@@ -68,6 +75,7 @@ def main():
         shutil.copyfile(ROOT / 'dist-files' / f, DIST / f)
     copytree(ROOT / 'dist-files' / '授權', DIST / '授權')
     (DIST / '輸出').mkdir(exist_ok=True)
+    (DIST / 'runtime' / 'runtime.txt').write_text(str(RUNTIME), encoding='utf-8')
     print('完成：', DIST)
     if '--zip' in sys.argv:
         # GitHub Release 的附檔名稱會去掉中文，zip 用英文名稱（解開來的資料夾還是 vi-tools辨識套件）
@@ -80,6 +88,22 @@ def main():
                 if p.is_file() and rel.parts[1] != '輸出' and '__pycache__' not in rel.parts and p.name != 'sitecustomize.py':
                     zf.write(p, rel.as_posix())
         print('zip：', z, '%.0f MB' % (z.stat().st_size / 1e6))
+        app_zip(ver)
+
+
+def app_zip(ver):
+    """只有 app\\ 的 zip（裡面是 app/...）＋ update.json"""
+    z = ROOT / 'dist' / ('vi-tools-recognizer-%s-app.zip' % ver)
+    with zipfile.ZipFile(z, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+        for p in sorted((ROOT / 'app').rglob('*')):
+            rel = p.relative_to(ROOT)
+            if p.is_file() and '__pycache__' not in rel.parts and p.suffix != '.pyc':
+                zf.write(p, rel.as_posix())
+    data = z.read_bytes()
+    info = {'version': ver, 'runtime': RUNTIME,
+            'app': {'name': z.name, 'size': len(data), 'sha256': hashlib.sha256(data).hexdigest()}}
+    (ROOT / 'dist' / 'update.json').write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding='utf-8')
+    print('app zip：', z, '%.1f MB' % (len(data) / 1e6), '；update.json')
 
 
 if __name__ == '__main__':

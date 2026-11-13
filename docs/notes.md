@@ -145,3 +145,10 @@ python tools\build.py --zip
 - `server.py`：路由、CORS 白名單同 `/api/ocr`；試卷版（沒有 Audiveris、homr）回 409「這是試卷版，沒有樂譜辨識」；`GET /api/ocr` 多回 `omr`（＝`music_available()`），網頁看這個才出現「樂譜」。
 - 圖的大小限制（2026-11-11，codex 程式碼審查發現）：解碼前先看尺寸，超過 4 千萬像素回 400「圖太大，請裁小一點」（檔案小、尺寸大的圖解碼後會吃光記憶體）；照線距放大後長邊最多 12,000 像素；壞掉的 base64、不是圖片都回 400。
 - 實測（音樂班試題譜例縮成截圖大小）：115 單行旋律 1206×132（線距 9.5 → 放大 2.1 倍）6 秒，兩個引擎音高大致對，homr 認成 4/8、Audiveris 2/4；114 鋼琴譜 844×274（線距 8 → 2.5 倍）10 秒，homr 少很多音、Audiveris 讀到的比較多。仍然只是草稿（方框當小節線、調號常漏）。
+
+## 0.4.3：自己更新程式（2026-11-13 做好）
+- 0.4.0 之後的 0.4.1、0.4.2、0.4.3 都只改了 app\（約 3 MB），整包 300～530 MB 大多是 runtime\（Python 與套件、模型、Audiveris），很少改。所以新版只換 app\。
+- Release 多附兩個檔（`tools/build.py --zip` 產生，試卷版、完整版共用）：`vi-tools-recognizer-<版本>-app.zip`（zip 裡是 app/...）、`update.json`（version、runtime、app 的 name／size／sha256）。
+- runtime 版本：`tools/build.py` 的 `RUNTIME`（加了套件、換了模型就加 1），寫到 `runtime\runtime.txt`；沒有這個檔＝1。update.json 的 runtime 比裝的大 → 不能只換 app\，回 409 請使用者下載整包。
+- `app/update.py`：`status()` 查 GitHub API releases/latest 的 update.json（一小時查一次）；`apply()` 下載 app zip → 核對大小、sha256 → 只收 `app/` 底下、沒有 `..` 的路徑 → app\ 備份成 app.bak\ → 新檔寫進 app\、刪掉新版沒有的檔（寫到一半失敗從 app.bak\ 還原）；`restart()` 用同樣的 Python 再開一個（`--no-browser`，環境變數 VITOOLS_PORT 指定同一個連接埠，`serve()` 最多等 20 秒讓舊的放掉），這個 `os._exit(0)`。命令提示字元開的，新的接著用同一個視窗；桌面版開的留在同一個 Job 物件，app 關掉時一起關（桌面版 StartAsync 先 ping，找得到新的）。
+- `server.py`：`GET /api/update`（狀態）、`POST /api/update`（更新；有辨識在跑 → 409），vi-tools 網頁或自己的頁面才可以；`GET /api/ocr` 多回 `update: true`，網頁看這個才出現「更新辨識套件」按鈕。測試：`VITOOLS_UPDATE_API` 指到假的 Release JSON（`E:\Project\agy-work\20261112-subsup\t_update.py`：雜湊值不符、runtime 不夠、正常更新＋重新啟動同一個連接埠、新增／刪掉的檔案、app.bak，10 項全過；網頁按鈕整套也測過）。

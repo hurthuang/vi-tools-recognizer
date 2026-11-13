@@ -4,7 +4,7 @@
 
 - 全部在本機執行，試卷不會傳到網路上；不需要網路，闈場也能用。
 - Windows 10／11 64 位元的可攜版：到 [Releases](https://github.com/hurthuang/vi-tools-recognizer/releases) 下載 zip，解壓縮後雙擊 `vi-tools辨識套件.cmd`。兩種：試卷版（`…-exam-portable.zip`，約 300 MB，不含樂譜辨識）、完整版（`…-portable.zip`，約 530 MB）。使用說明在 zip 裡的 `說明.txt`（原檔 `dist-files/說明.txt`）。
-- 只聽 127.0.0.1，只接受 vi-tools 網頁的來源呼叫 `/api/ocr`、`/api/doc`、`/api/word`（用這台電腦的 Word 把 .doc／.docx 另存 PDF，0.4.1）、`/api/omr`（一塊譜例的圖辨識成 MusicXML，給 vi-tools 文字辨識頁的樂譜模式；只有完整版，0.4.2）。
+- 只聽 127.0.0.1，只接受 vi-tools 網頁的來源呼叫 `/api/ocr`、`/api/doc`、`/api/word`（用這台電腦的 Word 把 .doc／.docx 另存 PDF，0.4.1）、`/api/omr`（一塊譜例的圖辨識成 MusicXML，給 vi-tools 文字辨識頁的樂譜模式；只有完整版，0.4.2）、`/api/update`（有新版時只下載換掉 app\ 約 1 MB、自己重新啟動，0.4.3）。
 
 ## 辨識用的工具
 

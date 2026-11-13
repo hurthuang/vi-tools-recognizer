@@ -11,7 +11,9 @@ POST /api/doc/<id>/cancel 做完這一頁就停
 POST /api/word            JSON {name, data(base64)} → {pdf, docx}（base64）：用這台電腦的 Word 把 .doc／.docx 另存 PDF（0.4.1）
 POST /api/omr             JSON {image(base64／dataURL), engines?} → {results:[{engine, musicxml | error, sec}], spacing, scale, sec}：
                           辨識一塊譜例（Audiveris、homr 一起跑），給 vi-tools 文字辨識頁的樂譜模式（0.4.2，omr_region.py）；試卷版沒有 → 409
-                          只有 /api/ocr、/api/doc、/api/word、/api/omr 接受 vi-tools 網頁（線上版、桌面版、本機副本）的跨來源請求（CORS）
+GET  /api/update          {version, latest, newer, can_update, need_full, url}：GitHub 上有沒有新版（update.py，0.4.3）
+POST /api/update          下載新版的 app\ 換上、重新啟動（同一個連接埠）→ {ok, version}；要整包下載的版本 → 409
+                          只有 /api/ocr、/api/doc、/api/word、/api/omr、/api/update 接受 vi-tools 網頁（線上版、桌面版、本機副本）的跨來源請求（CORS）
 POST /api/jobs            JSON {name, data(base64), pages, refs:[{name, data}]} → {id}
 GET  /api/jobs/<id>       {state, log[], report, files[]}
 GET  /api/jobs/<id>/file?name=…   下載輸出檔
@@ -192,7 +194,7 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         o = self._vitools_origin()
         p = u.path.rstrip('/')
-        if o and (p in ('/api/ocr', '/api/doc', '/api/word', '/api/omr') or p.startswith('/api/doc/')):
+        if o and (p in ('/api/ocr', '/api/doc', '/api/word', '/api/omr', '/api/update') or p.startswith('/api/doc/')):
             self.send_response(204)
             for k, v in self._cors(o).items():
                 self.send_header(k, v)
@@ -211,7 +213,8 @@ class Handler(BaseHTTPRequestHandler):
             import engines
             import word
             return self._send(200, {'name': 'vi-tools 辨識套件', 'version': VERSION, 'ocr': ['auto', 'math', 'text'], 'doc': True,
-                                    'word': word.available(), 'music': engines.music_available(), 'omr': engines.music_available()}, extra=extra)
+                                    'word': word.available(), 'music': engines.music_available(), 'omr': engines.music_available(),
+                                    'update': True}, extra=extra)
         try:
             req = json.loads(body.decode('utf-8'))
             from exam import region
@@ -295,6 +298,27 @@ class Handler(BaseHTTPRequestHandler):
             traceback.print_exc()
             return self._send(400 if isinstance(e, (ValueError, KeyError, RuntimeError)) else 500, {'error': str(e)}, extra=extra)
 
+    def _update(self, method):
+        """GET 查新版、POST 更新（update.py）。vi-tools 網頁或辨識套件自己的頁面才可以。"""
+        o = self._vitools_origin()
+        if self.headers.get('Origin') and not o and not self._origin_ok():
+            return self._send(403, {'error': '不接受其他網站的請求'})
+        extra = self._cors(o)
+        import update
+        if method == 'GET':
+            return self._send(200, update.status(), extra=extra)
+        busy = [j for j in JOBS.values() if j.state == 'running']
+        if busy:
+            return self._send(409, {'error': '還有辨識在跑，做完再更新'}, extra=extra)
+        try:
+            r = update.apply()
+        except Exception as e:  # noqa: BLE001
+            traceback.print_exc()
+            return self._send(409 if isinstance(e, RuntimeError) else 500, {'error': str(e)}, extra=extra)
+        print('已更新到 %s，重新啟動中…' % r['version'])
+        self._send(200, {'ok': True, 'version': r['version']}, extra=extra)
+        update.restart(self.server)
+
     def _send(self, code, body, ctype='application/json; charset=utf-8', extra=None):
         if isinstance(body, (dict, list)):
             body = json.dumps(body, ensure_ascii=False).encode('utf-8')
@@ -320,6 +344,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._exam_get(u, [urllib.parse.unquote(p) for p in parts[1:]])
         if parts == ['api', 'ocr']:
             return self._ocr('GET')
+        if parts == ['api', 'update']:
+            return self._update('GET')
         if parts[:2] == ['api', 'doc']:
             return self._doc('GET', parts[2:])
         if parts == ['api', 'info']:
@@ -362,6 +388,8 @@ class Handler(BaseHTTPRequestHandler):
             if n > DOC_MAX:
                 return self._send(413, {'error': '檔案太大'}, extra=self._cors(self._vitools_origin()))
             return self._word(self.rfile.read(n) if n else b'')
+        if parts == ['api', 'update']:
+            return self._update('POST')
         if not self._origin_ok():
             return self._send(403, {'error': '不接受其他網站的請求'})
         body = self.rfile.read(n) if n else b''
@@ -471,7 +499,16 @@ class Server(ThreadingHTTPServer):
 
 def serve(open_browser=True):
     httpd = None
-    for port in PORT_RANGE:
+    # 更新後重新啟動：舊的還在關，等它放掉原本的連接埠（最多 20 秒），網頁才連得回同一個網址
+    want = os.environ.pop('VITOOLS_PORT', '')
+    if want.isdigit():
+        for _ in range(40):
+            try:
+                httpd = Server(('127.0.0.1', int(want)), Handler)
+                break
+            except OSError:
+                time.sleep(0.5)
+    for port in ([] if httpd else PORT_RANGE):
         try:
             httpd = Server(('127.0.0.1', port), Handler)
             break
