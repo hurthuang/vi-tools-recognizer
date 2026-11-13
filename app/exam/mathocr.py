@@ -86,6 +86,14 @@ def tidy(tex):
     t = re.sub(r'\s+\}', '}', t)
     t = re.sub(r'\^\{(\w)\}', r'^\1', t)
     t = re.sub(r'_\{(\w)\}', r'_\1', t)
+    # 弧 AB：\widehat{AB}（2～3 個大寫字母）、\overparen{…} → \overset{\frown}{AB}（vi-tools vtdoc.js arcTex 同規則）
+    t = re.sub(r'\\(?:overparen|wideparen|overarc|arc)\s*\{\s*([^{}]+?)\s*\}|\\widehat\s*\{\s*([A-Z](?:\s*[A-Z]){1,2})\s*\}',
+               lambda m: '\\overset{\\frown}{' + re.sub(r'\s+', '', m.group(1) or m.group(2)) + '}', t)
+    # 單獨一個反斜線：`{\}`、結尾多一個 `\`（畫不出來、還會吃掉 \)；vi-tools vtdoc.js loneBsTex 同規則）
+    t = re.sub(r'(^|[^\\])\{\s*\\\s*\}', r'\1', t)
+    t = re.sub(r'\\protect\b\s*\.?\s*', '', t)  # 「且 \protect. AB∥CD」：模型多吐的，畫出來是紅字
+    t = re.sub(r'(?:\s*\\)+\s*$', '', t)
+    t = re.sub(r'\s{2,}', ' ', t).strip()
     return t
 
 
@@ -202,13 +210,13 @@ def split_cjk(tex):
                     out.append(['text', t])
                 i = m.end()
                 continue
-            # 指令整個照抄（\{ \} 不算括號）
-            m = re.match(r'\\(?:[A-Za-z]+|.)', src[i:])
+            # 指令整個照抄（\{ \} 不算括號）；結尾單獨的反斜線、反斜線接換行也要吃掉（不然 m 是 None，整份辨識失敗）
+            m = re.match(r'\\(?:[A-Za-z]+|.)?', src[i:], re.S)
             buf += m.group(0)
             i += len(m.group(0))
             continue
         if c == '\\':
-            m = re.match(r'\\(?:[A-Za-z]+|.)', src[i:])
+            m = re.match(r'\\(?:[A-Za-z]+|.)?', src[i:], re.S)
             buf += m.group(0)
             i += len(m.group(0))
             continue

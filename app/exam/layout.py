@@ -117,8 +117,62 @@ def in_sentence(it, items):
             continue
         if len(re.findall(r'[一-鿿]', o['text'])) < 4 and not OPTION.search(o['text']):
             continue
-        if o['box'][1] <= cy <= o['box'][3] and \
-                (0 <= it['box'][0] - o['box'][2] < gap or 0 <= o['box'][0] - it['box'][2] < gap):
+        if not o['box'][1] <= cy <= o['box'][3]:
+            continue
+        if 0 <= it['box'][0] - o['box'][2] < gap or 0 <= o['box'][0] - it['box'][2] < gap:
+            return True
+        # 夾在一行的中間（文字層的一整行橫跨算式：「首項為 a₁，公差為 d」算式框裡的字被拿掉了）：
+        # 左右緊鄰都有那一行的字才算（3b5 參考公式頁的 a₁、d、n 被旁邊的附圖當成標籤收走）
+        cs = o.get('chars') or []
+        if cs and any(0 <= it['box'][0] - c[2] < gap for c in cs) and any(0 <= c[1] - it['box'][2] < gap for c in cs):
+            return True
+    return False
+
+
+def sentence_chain(items):
+    """跟題目、選項、句子同一行、左右一個接一個連過去的項目（索引 i 的集合）。
+    「( )5.如下圖，AB∥CD。若 AE弧=42°」：圖在上一題，這一行開頭的算式和短字不是那張圖的標示（2026-11-13）"""
+    def seed(o):
+        if o['kind'] != 'text':
+            return False
+        t = o['text']
+        # 句子要有標點（座標軸名稱「投進球數(球)」「(單位：公分)」「←小揚小文→」不算）
+        return bool(QNUM.match(t)) or bool(OPTION.search(t)) or \
+            (len(re.findall(r'[一-鿿]', t)) >= 4 and bool(re.search(r'[，。？；、]', t)))
+    got = {o['i'] for o in items if seed(o)}
+    todo = [o for o in items if o['i'] in got]
+    while todo:
+        o = todo.pop()
+        oy0, oy1 = o['box'][1], o['box'][3]
+        for it in items:
+            if it['i'] in got:
+                continue
+            y0, y1 = it['box'][1], it['box'][3]
+            cy = (y0 + y1) / 2
+            if not (oy0 <= cy <= oy1 or y0 <= (oy0 + oy1) / 2 <= y1):
+                continue
+            gap = 1.5 * min(y1 - y0, oy1 - oy0)
+            if 0 <= it['box'][0] - o['box'][2] < gap or 0 <= o['box'][0] - it['box'][2] < gap:
+                got.add(it['i'])
+                todo.append(it)
+    return got
+
+
+def behind_line(it, fb, items):
+    """項目跟圖中間（上下方向）隔著一行題目、選項或句子 → 不是這張圖的標示。
+    （2026-11-13：第 5 題「。若」「∠D=？」在選項那一行上面，被下面的附圖收走）"""
+    cy = (it['box'][1] + it['box'][3]) / 2
+    if fb[1] <= cy <= fb[3]:
+        return False
+    lo, hi = (it['box'][3], fb[1]) if cy < fb[1] else (fb[3], it['box'][1])
+    for o in items:
+        if o is it or o['kind'] != 'text' or o['box'][2] < fb[0] or o['box'][0] > fb[2]:
+            continue
+        oy = (o['box'][1] + o['box'][3]) / 2
+        if not lo < oy < hi:
+            continue
+        t = o['text']
+        if OPTION.search(t) or QNUM.match(t) or len(re.findall(r'[一-鿿]', t)) >= 4:
             return True
     return False
 
@@ -246,9 +300,11 @@ def auto_blocks(page, gray, page_no):
         figs = [f for f in figs if not wordy(f)]
     used = set()
     blocks = []
+    sent = sentence_chain(items)
     for fb, isimg in [(r, True) for r in imgfigs] + [(f, False) for f in figs]:
         near = [fb[0] - 80, fb[1] - 90, fb[2] + 80, fb[3] + 90]
-        mine = [it['i'] for it in items if it['i'] not in used and (
+        mine = [it['i'] for it in items if it['i'] not in used and not behind_line(it, fb, items) and
+                not (it['i'] in sent and not inside(it['box'], fb)) and (
                 (isimg and it.get('src') == 'ocr' and inside(it['box'], fb, 4)) or  # 圖片裡辨識出的字
                 (isimg and it['kind'] == 'text' and inside(it['box'], fb, 60) and label_line(it) and
                  len(it['text'].strip()) <= 10) or  # 圖片旁邊的座標軸、圖說（文字層）
@@ -262,7 +318,8 @@ def auto_blocks(page, gray, page_no):
             fb = union([fb] + [items[i]['box'] for i in mine])
             mine += [it['i'] for it in items if it['i'] not in used and it['i'] not in mine and it['kind'] == 'text'
                      and inside(it['box'], fb, 50) and label_line(it) and len(it['text'].strip()) <= 10
-                     and not CAPTION.match(it['text'].strip())]
+                     and not CAPTION.match(it['text'].strip()) and not behind_line(it, fb, items)
+                     and not (it['i'] in sent and not inside(it['box'], fb))]
             fb = union([fb] + [items[i]['box'] for i in mine])
         # 圖說「圖（1）」：在圖的下方或旁邊
         caption = ''
@@ -1182,6 +1239,57 @@ def norm_ref(s):
     return re.sub(r'[\s()（）]', '', s)
 
 
+# 文字層裡只剩上面的記號、底下的字母不見了（「撞球檯，̅̅̅̅為240」「其弧長̂、̂」：字母是另一種字型、讀不出來）
+#   → 用同一個位置 OCR 認到的字母補回來，拆成「前面的字＋算式＋後面的字」（2026-11-13 使用者回報）
+MARKS = {'̅': 'overline', '̄': 'overline', '̂': 'arc', '⃗': 'vec', '⃑': 'vec'}
+
+
+def _mark_tex(kind, s):
+    if kind == 'overline':
+        return '\\overline{%s}' % s
+    if kind == 'vec':
+        return '\\overrightarrow{%s}' % s
+    return '\\overset{\\frown}{%s}' % s if len(s) >= 2 else '\\hat{%s}' % s
+
+
+def fill_marks(titems, ocr):
+    out = []
+    for it in titems:
+        cs = it.get('chars') or []
+        if it.get('kind') != 'text' or not any(c[0] in MARKS for c in cs):
+            out.append(it)
+            continue
+        y0, y1 = it['box'][1], it['box'][3]
+        letters = [c for o in ocr if o.get('kind') == 'text' and min(o['box'][3], y1) - max(o['box'][1], y0) > 0.5 * (y1 - y0)
+                   for c in (o.get('chars') or []) if re.fullmatch(r'[A-Za-z0-9]', c[0])]
+        pieces, cur = [], []
+        k = 0
+        while k < len(cs):
+            if cs[k][0] not in MARKS or (k and re.fullmatch(r'[A-Za-z0-9]', cs[k - 1][0])):
+                cur.append(cs[k])
+                k += 1
+                continue
+            j = k
+            while j < len(cs) and cs[j][0] == cs[k][0]:
+                j += 1
+            x0, x1 = cs[k][1], cs[j - 1][2]
+            got = sorted((c for c in letters if min(c[2], x1) - max(c[1], x0) > 0.4 * (c[2] - c[1])), key=lambda c: c[1])
+            if got:
+                pieces.append(('t', cur))
+                pieces.append(('m', _mark_tex(MARKS[cs[k][0]], ''.join(c[0] for c in got)), [x0, y0, x1, y1]))
+                cur = []
+            k = j  # 補不回來的記號也拿掉（留著只會是一個怪字）
+        pieces.append(('t', cur))
+        for p in pieces:
+            if p[0] == 'm':
+                out.append(dict(kind='math', tex=p[1], box=p[2], score=it.get('score', 1.0), iso=False, src='pdf'))
+            elif p[1]:
+                txt = ''.join(c[0] for c in p[1])
+                if txt.strip():
+                    out.append(dict(it, text=txt, chars=p[1], box=[p[1][0][1], y0, p[1][-1][2], y1]))
+    return out
+
+
 def load(d, use_text_layer=True):
     """d：試卷資料夾（pNN.json／png，有文字層的還有 tNN.json）。"""
     pages, grays = [], []
@@ -1196,7 +1304,9 @@ def load(d, use_text_layer=True):
             drop = set(t['drop_math'])  # 算式框裡其實是中文的，改用文字層
             keep = set(t.get('keep_ocr', []))  # 附圖（內嵌圖片）裡的字：文字層沒有，用 OCR 的
             ocr_in_img = [dict(it, src='ocr') for k, it in enumerate(p['items']) if k in keep]
-            p['items'] = [it for k, it in enumerate(p['items']) if it['kind'] == 'math' and k not in drop] +                 t['items'] + ocr_in_img
+            ocr_text = [it for it in p['items'] if it['kind'] == 'text']
+            p['items'] = [it for k, it in enumerate(p['items']) if it['kind'] == 'math' and k not in drop] + \
+                fill_marks(t['items'], ocr_text) + ocr_in_img
             p['images'] = t.get('images', [])
             if t.get('walls'):
                 p['walls'] = t['walls']  # 直書頁：分隔線＋空白帶
