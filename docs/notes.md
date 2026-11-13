@@ -146,7 +146,7 @@ python tools\build.py --zip
 - 圖的大小限制（2026-11-11，codex 程式碼審查發現）：解碼前先看尺寸，超過 4 千萬像素回 400「圖太大，請裁小一點」（檔案小、尺寸大的圖解碼後會吃光記憶體）；照線距放大後長邊最多 12,000 像素；壞掉的 base64、不是圖片都回 400。
 - 實測（音樂班試題譜例縮成截圖大小）：115 單行旋律 1206×132（線距 9.5 → 放大 2.1 倍）6 秒，兩個引擎音高大致對，homr 認成 4/8、Audiveris 2/4；114 鋼琴譜 844×274（線距 8 → 2.5 倍）10 秒，homr 少很多音、Audiveris 讀到的比較多。仍然只是草稿（方框當小節線、調號常漏）。
 
-## 0.4.3：自己更新程式（2026-11-13 做好）
+## 0.4.3：自己更新程式（2026-11-13 做好、發佈）
 - 0.4.0 之後的 0.4.1、0.4.2、0.4.3 都只改了 app\（約 3 MB），整包 300～530 MB 大多是 runtime\（Python 與套件、模型、Audiveris），很少改。所以新版只換 app\。
 - Release 多附兩個檔（`tools/build.py --zip` 產生，試卷版、完整版共用）：`vi-tools-recognizer-<版本>-app.zip`（zip 裡是 app/...）、`update.json`（version、runtime、app 的 name／size／sha256）。
 - runtime 版本：`tools/build.py` 的 `RUNTIME`（加了套件、換了模型就加 1），寫到 `runtime\runtime.txt`；沒有這個檔＝1。update.json 的 runtime 比裝的大 → 不能只換 app\，回 409 請使用者下載整包。

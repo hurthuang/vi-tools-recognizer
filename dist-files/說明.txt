@@ -1,4 +1,4 @@
-vi-tools 辨識套件 0.4.1（可攜版）
+vi-tools 辨識套件 0.4.3（可攜版）
 
 兩種版本（下載時選一個）
   試卷版（vi-tools-recognizer-版本-exam-portable.zip，約 300 MB）：試卷、講義的文字、算式、版面，Word 自動轉 PDF。大部分老師用這個。
