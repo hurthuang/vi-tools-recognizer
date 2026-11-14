@@ -280,7 +280,16 @@ def page_layer(page, dpi, items, min_chars=20, Wd=None, walls=()):
         if any(b[0] <= (c[1] + c[3]) / 2 <= b[2] and b[1] <= (c[2] + c[4]) / 2 <= b[3] for c in chars):
             continue  # 圖上蓋了文字層的字（文字方塊）：用文字層的
         keep.append(k)
-    out = dict(items=titems, drop_math=[mi[k] for k in drop], images=imgs, keep_ocr=keep)
+    # 算式框裡原卷的標點（依位置）：MFR 只會寫半形逗號，頓號、全形逗號要照原卷拆到算式外（mathocr.list_cuts）
+    punct = {}
+    for j, k in enumerate(mi):
+        if j in drop:
+            continue
+        b = items[k]['box']
+        cs = sorted((c for c in chars if c[0] in ',、，' and b[0] - 2 <= (c[1] + c[3]) / 2 <= b[2] + 2
+                     and b[1] - 2 <= (c[2] + c[4]) / 2 <= b[3] + 2), key=lambda c: (c[1] + c[3]) / 2)
+        punct[str(k)] = ''.join(c[0] for c in cs)
+    out = dict(items=titems, drop_math=[mi[k] for k in drop], images=imgs, keep_ocr=keep, math_punct=punct)
     if Wd is not None and walls:
         out['walls'] = list(walls)
     return out

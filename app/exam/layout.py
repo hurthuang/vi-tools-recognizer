@@ -1313,6 +1313,10 @@ def load(d, use_text_layer=True):
             keep = set(t.get('keep_ocr', []))  # 附圖（內嵌圖片）裡的字：文字層沒有，用 OCR 的
             ocr_in_img = [dict(it, src='ocr') for k, it in enumerate(p['items']) if k in keep]
             ocr_text = [it for it in p['items'] if it['kind'] == 'text']
+            if 'math_punct' in t:  # 原卷在算式框裡的標點（0.4.5 以前存的 tNN.json 沒有：當掃描檔猜）
+                for k, it in enumerate(p['items']):
+                    if it['kind'] == 'math':
+                        it['punct'] = t['math_punct'].get(str(k), '')
             p['items'] = [it for k, it in enumerate(p['items']) if it['kind'] == 'math' and k not in drop] + \
                 fill_marks(t['items'], ocr_text) + ocr_in_img
             p['images'] = t.get('images', [])

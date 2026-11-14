@@ -271,9 +271,131 @@ def split_cjk_toks(toks):
     toks[:] = out
 
 
+LIST_REL = re.compile(r'[=<>≤≥≠≈]|\\(?:leq?|geq?|neq?|approx|equiv|parallel|perp|sim|cong|leqslant|geqslant|lt|gt)(?![a-zA-Z])')
+LIST_OP = re.compile(r'[-+*/×÷]|\\(?:times|div|frac|sqrt|pm|cdot)(?![a-zA-Z])')
+
+
+def list_parts(tex):
+    """切最外層（括號外）的 , 、 ，；→ (段, 分隔)。座標、集合、函數參數在括號裡，不切。"""
+    segs, seps, cur, depth, i = [], [], '', 0, 0
+    while i < len(tex):
+        c = tex[i]
+        if c == '\\':
+            m = re.match(r'\\(?:[A-Za-z]+|.)?', tex[i:], re.S)
+            tok = m.group(0)
+            if tok in ('\\{', '\\langle'):
+                depth += 1
+            elif tok in ('\\}', '\\rangle'):
+                depth -= 1
+            cur += tok
+            i += len(tok)
+            continue
+        if c in '([{':
+            depth += 1
+        elif c in ')]}':
+            depth -= 1
+        if depth <= 0 and c in ',、，':
+            segs.append(cur)
+            seps.append(c)
+            cur = ''
+        else:
+            cur += c
+        i += 1
+    segs.append(cur)
+    return segs, seps
+
+
+def top_level(s):
+    """小括號、中括號外的部分（座標裡的負號不算運算）"""
+    out, depth = '', 0
+    for c in s:
+        if c in '([':
+            depth += 1
+        elif c in ')]':
+            depth -= 1
+        elif depth <= 0:
+            out += c
+    return out
+
+
+def short_item(s):
+    """列舉的一項：單一字母、數字、點、線段、角、座標（A(3, -2)、(2, 2)）；沒有關係符號、運算"""
+    top = top_level(s)
+    if LIST_REL.search(s) or LIST_OP.search(top):
+        return False
+    bare = re.sub(r'\\[A-Za-z]+|[{}\s]', '', top)
+    return 0 < len(bare) <= 6 or (not bare and '(' in s)
+
+
+def list_cuts(tex, marks=None):
+    """算式裡最外層的逗號、頓號要不要拆到算式外（朗讀、點字才會把它當中文標點）。
+    → None（不拆）或 [(段, 拆開後的標點或 None＝留在算式裡), …]（最後一段的標點是 None）。
+    marks：PDF 文字層在這個算式框裡的標點（依位置，例如 '、、'）；None＝沒有文字層（掃描檔）。
+    規則（2026-11-14 跟使用者討論定的）：
+      前後兩段都有關係符號（=、<、∥…）→ 拆，用「，」（原卷是頓號就照原卷）
+      文字層有、數量對得上 → 頓號、全形逗號照原卷拆；原卷印半形逗號的列舉（x, y, z, w）不拆
+      沒有文字層或對不上 → 每一項都很短（字母、點、線段、角、座標）的列舉猜成頓號"""
+    segs, seps = list_parts(tex)
+    if not seps or any(not s.strip() for s in segs):
+        return None
+    mk = [m for m in marks if m in ',、，'] if marks is not None else None
+    if mk is not None and len(mk) != len(seps):
+        mk = None
+    allshort = all(short_item(s) for s in segs)
+    out, cut = [], False
+    for k, sep in enumerate(seps):
+        a, b = segs[k], segs[k + 1]
+        rel = bool(LIST_REL.search(a)) and bool(LIST_REL.search(b))
+        orig = mk[k] if mk else sep
+        if orig in '、，':
+            p = orig
+        elif rel:
+            p = '，'
+        elif mk is None and allshort:
+            p = '、'
+        else:
+            p = None
+        out.append((a, p))
+        cut = cut or p is not None
+    out.append((segs[-1], None))
+    return out if cut else None
+
+
+def split_list_toks(toks):
+    """render_line 用：算式裡最外層的逗號、頓號照 list_cuts 拆成兩個算式＋中文標點（位置照字數比例分）。"""
+    out = []
+    for t in toks:
+        cuts = list_cuts(t['tex'], t.get('punct')) if t['kind'] == 'math' else None
+        if not cuts:
+            out.append(t)
+            continue
+        pieces, cur = [], ''
+        for j, (seg, p) in enumerate(cuts):
+            if p is None:
+                cur += seg + (',' if j < len(cuts) - 1 else '')
+            else:
+                pieces += [('m', cur + seg), ('p', p)]
+                cur = ''
+        pieces.append(('m', cur))
+        n = sum(len(v) for _, v in pieces) or 1
+        x, w, k = t['x0'], t['x1'] - t['x0'], 0
+        for kind, v in pieces:
+            x0 = x + w * k / n
+            k += len(v)
+            x1 = x + w * k / n
+            if kind == 'm':
+                v = re.sub(r'\s+', ' ', v).strip()
+                if v:
+                    out.append(dict(t, tex=v, x0=x0, x1=x1, punct=None))
+            else:
+                out.append(dict(kind='ch', ch=v, x0=x0, x1=x1, score=t['score']))
+    toks[:] = out
+
+
 def edge_punct(toks):
     """render_line 用：算式頭尾的標點依前後文移到算式外。整串只有標點的（虛線被當成算式）拿掉。"""
     split_cjk_toks(toks)
+    split_list_toks(toks)
     out = []
     for i, t in enumerate(toks):
         if t['kind'] != 'math':
@@ -299,7 +421,8 @@ def tokens_of(parts):
     toks = []
     for p in parts:
         if p['kind'] == 'math':
-            toks.append(dict(kind='math', tex=p['tex'], x0=p['box'][0], x1=p['box'][2], score=p['score']))
+            toks.append(dict(kind='math', tex=p['tex'], x0=p['box'][0], x1=p['box'][2], score=p['score'],
+                             punct=p.get('punct')))
         else:
             for ch, x0, x1, sc in p['chars']:
                 toks.append(dict(kind='ch', ch=ch, x0=x0, x1=x1, score=sc))

@@ -162,3 +162,13 @@ python tools\build.py --zip
 - `tools/build.py`：`RUNTIME = 2`（models 多兩個檔，要整包更新），打包前檢查兩個檔在 build\models\mfr。
 - `mathocr.tidy`：`{\triangle} A B C`、`\triangle{A B C}` → `\triangle ABC`，`\angle` 同規則（vi-tools vtdoc.js triTex）。
 - `layout.paragraphs`：「Kelly:」「Mr. Lin:」「小明：」開頭的行另起一段（`SPEAKER`，vi-tools vtdoc-build.js 同規則）；`join_lines` 英文句尾標點接英文字補空格（「prize!」「The」）。
+
+## 算式裡的逗號、頓號拆到算式外（2026-11-14，`math-punct` 分支）
+- 為什麼：MFR 只會寫半形逗號，原卷的「A、B」「AB=8，BC=5」被框成同一個算式時，整段變成數學逗號；朗讀會念「逗號」或不停頓，點字是 Nemeth 逗號，學生也不好一個條件一個條件檢查。
+- 規則（使用者 2026-11-14 定）：`mathocr.list_cuts`，在 `render_line`（`split_list_toks`）拆成「算式＋中文標點＋算式」
+  - 括號裡的逗號（座標、集合、函數參數）不動
+  - 前後兩段都有關係符號（= < > ≤ ≥ ≠ ∥ ⊥ …）→ 拆，用「，」
+  - PDF 文字層（`textlayer.page_layer` 的 `math_punct`：每個算式框裡原卷的標點）數量對得上 → 頓號、全形逗號照原卷拆；原卷印半形逗號的列舉（x, y, z, w）不拆
+  - 沒有文字層（掃描檔）或對不上 → 每一項都很短（字母、點、線段、角、座標）的列舉猜成「、」
+  - 舊的 tNN.json 沒有 `math_punct`，當掃描檔猜
+- vi-tools 版面整理單獨辨識一個算式（mfr-tidy.js `splitList`）用同規則的猜法版。
