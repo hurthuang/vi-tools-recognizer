@@ -152,3 +152,13 @@ python tools\build.py --zip
 - runtime 版本：`tools/build.py` 的 `RUNTIME`（加了套件、換了模型就加 1），寫到 `runtime\runtime.txt`；沒有這個檔＝1。update.json 的 runtime 比裝的大 → 不能只換 app\，回 409 請使用者下載整包。
 - `app/update.py`：`status()` 查 GitHub API releases/latest 的 update.json（一小時查一次）；`apply()` 下載 app zip → 核對大小、sha256 → 只收 `app/` 底下、沒有 `..` 的路徑 → app\ 備份成 app.bak\ → 新檔寫進 app\、刪掉新版沒有的檔（寫到一半失敗從 app.bak\ 還原）；`restart()` 用同樣的 Python 再開一個（`--no-browser`，環境變數 VITOOLS_PORT 指定同一個連接埠，`serve()` 最多等 20 秒讓舊的放掉），這個 `os._exit(0)`。命令提示字元開的，新的接著用同一個視窗；桌面版開的留在同一個 Job 物件，app 關掉時一起關（桌面版 StartAsync 先 ping，找得到新的）。
 - `server.py`：`GET /api/update`（狀態）、`POST /api/update`（更新；有辨識在跑 → 409），vi-tools 網頁或自己的頁面才可以；`GET /api/ocr` 多回 `update: true`，網頁看這個才出現「更新辨識套件」按鈕。測試：`VITOOLS_UPDATE_API` 指到假的 Release JSON（`E:\Project\agy-work\20261112-subsup\t_update.py`：雜湊值不符、runtime 不夠、正常更新＋重新啟動同一個連接埠、新增／刪掉的檔案、app.bak，10 項全過；網頁按鈕整套也測過）。
+
+## 算式辨識加快、三角形、對話分段（2026-11-13，`mfr-kv` 分支）
+
+- 使用者在 i5-5200U（2015 年筆電，2 核心 4 執行緒）上辨識很久。量 113 複習 3b5（17 頁、286 個算式）：算式辨識裡「一個一個吐符號」的 decoder 占 74%，原本每一步把前面的符號整串重算（decoder_model.onnx 沒有 past key/value）。
+- `tools/export_mfr_kv.py`：從 decoder_model.onnx 的權重重建 TrOCR decoder（6 層、d=256；post-LN、learned position offset 2、embedding 乘 sqrt(256)），匯出 `decoder_cross.onnx`（encoder 輸出 → 每層 cross-attention 的 K、V，每批圖算一次，4.8 MB）與 `decoder_step.onnx`（這一步的 token＋前面的 self K/V＋cross K/V → logits＋新的 self K/V，27 MB）。要 torch、onnx，只在打包的電腦跑。
+- `app/exam/ort_mfr.py`：models\mfr 有這兩個檔就用（`MFR_KV=0` 切回原版），沒有就照原本的方式。前 30 步 logits 最大差 3e-5；286 個算式結果一字不差。
+- 速度（綁 4 個邏輯處理器模擬 2 核心 4 執行緒）：整份試卷 391 → 209 秒（掃描模式 389 → 205 秒），試卷.txt 一字不差；只算 MFR：全速 130 → 61 秒、2 執行緒 243 → 87 秒。剩下的時間 encoder 占多數（沒動）。
+- `tools/build.py`：`RUNTIME = 2`（models 多兩個檔，要整包更新），打包前檢查兩個檔在 build\models\mfr。
+- `mathocr.tidy`：`{\triangle} A B C`、`\triangle{A B C}` → `\triangle ABC`，`\angle` 同規則（vi-tools vtdoc.js triTex）。
+- `layout.paragraphs`：「Kelly:」「Mr. Lin:」「小明：」開頭的行另起一段（`SPEAKER`，vi-tools vtdoc-build.js 同規則）；`join_lines` 英文句尾標點接英文字補空格（「prize!」「The」）。

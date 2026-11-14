@@ -447,12 +447,16 @@ def join_lines(texts):
         t = t.strip()
         if not t:
             continue
-        if out and (re.match(r'[A-Za-z0-9$\\(]', t[:1]) and re.search(r'[A-Za-z0-9$)]$', out)):
-            out += ' '
+        if out and (re.match(r'[A-Za-z0-9$\\(]', t[:1]) and re.search(r'[A-Za-z0-9$)]$', out) or
+                    re.match(r'[A-Za-z‘“"]', t[:1]) and re.search(r'[A-Za-z][.,;:!?’”"]$', out)):
+            out += ' '   # 英文句子換行：「prize!」接「The」也要空（vi-tools vtdoc-build.js 同規則）
         out += t
     return out
 
 
+# 對話：「Kelly:」「A:」「Mr. Lin:」「小明：」開頭的行是另一個人說話，另起一段（vi-tools vtdoc-build.js 同規則）
+SPEAKER = re.compile(r'^\s*(?:(?:Mr|Mrs|Ms|Miss|Dr)\.\s?)?[A-Z][A-Za-z]{0,11}(?:\s[A-Z][A-Za-z]{0,11})?\s?[:：](?!\d)'
+                     r'|^\s*[一-鿿]{1,4}[:：]')
 BULLET = re.compile(r'^\s*(?:[●•‧■□◆◇★☆※▲△]|[①-⑳]|[（(]\s*(?:[甲乙丙丁戊己庚辛]|[1-9]|[一二三四五六])\s*[)）]'
                     r'|[甲乙丙丁戊己庚辛]\s*(?:[：:]|、(?!\s*[甲乙丙丁戊己庚辛]))|\d{1,2}\s*[.．、](?!\d))')
 # ↑「甲、冬季…」是項目，「甲、乙兩人」不是
@@ -476,6 +480,10 @@ def paragraphs(lns, strict):
         cur = ''.join(out[-1])
         if brk and len(re.findall(r'[（(]', cur)) > len(re.findall(r'[)）]', cur)):
             brk = False  # 括號還沒關（直書的「（①開心」折到下一欄「②傷心③紅心）」）
+        m = SPEAKER.match(ln['text'])
+        # 中文的「方式如下：」接在折行的「…月租費的」後面是同一句，不是另一個人說話
+        if m and (re.match(r'\s*[A-Za-z]', m.group(0)) or not (full and re.search(r'[一-鿿]\s*$', prev['text']))):
+            brk = True
         if brk:
             out.append([ln['text']])
         else:

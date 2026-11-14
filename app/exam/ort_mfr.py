@@ -2,6 +2,8 @@ r"""MFR（Pix2Text mfr-1.5，MIT）：算式圖 → LaTeX，只用 onnxruntime�
 
 recognize(imgs) → [{'text', 'score'}]，跟 Pix2Text 的 latex_ocr.recognize 一樣（含 post_process）。
 """
+import os
+
 import numpy as np
 import onnxruntime as ort
 from PIL import Image
@@ -23,7 +25,13 @@ def _load():
         enc = ort.InferenceSession(str(d / 'encoder_model.onnx'), so, providers=['CPUExecutionProvider'])
         dec = ort.InferenceSession(str(d / 'decoder_model.onnx'), so, providers=['CPUExecutionProvider'])
         tok = Tokenizer.from_file(str(d / 'tokenizer.json'))
-        _s = (enc, dec, tok)
+        # 記住前面算過的結果（tools/export_mfr_kv.py 從 decoder_model.onnx 的權重做的）：
+        # 每一步只算新的那個符號，結果跟 decoder_model 一樣、快 2～3 倍；沒有這兩個檔就用原本的
+        kv = None
+        if (d / 'decoder_step.onnx').is_file() and (d / 'decoder_cross.onnx').is_file() and os.environ.get('MFR_KV') != '0':
+            kv = (ort.InferenceSession(str(d / 'decoder_cross.onnx'), so, providers=['CPUExecutionProvider']),
+                  ort.InferenceSession(str(d / 'decoder_step.onnx'), so, providers=['CPUExecutionProvider']))
+        _s = (enc, dec, tok, kv)
     return _s
 
 
@@ -44,7 +52,7 @@ def _softmax_max(logits):
 
 
 def recognize(imgs, batch_size=8):
-    enc, dec, tok = _load()
+    enc, dec, tok, kv = _load()
     enc_in = enc.get_inputs()[0].name
     dnames = [i.name for i in dec.get_inputs()]
     out = []
@@ -55,16 +63,22 @@ def recognize(imgs, batch_size=8):
         ids = np.full((n, 1), BOS, dtype=np.int64)
         done = np.zeros(n, dtype=bool)
         probs = [[] for _ in range(n)]
+        if kv:
+            cross = kv[0].run(None, {'encoder_hidden_states': hidden})[0]
+            past = np.zeros((cross.shape[0], 2, n, cross.shape[3], 0, cross.shape[5]), np.float32)
         for _ in range(MAX_NEW):
-            feed = {}
-            for name in dnames:
-                if 'input_ids' in name:
-                    feed[name] = ids
-                elif 'encoder_hidden_states' in name:
-                    feed[name] = hidden
-                elif 'attention_mask' in name:
-                    feed[name] = np.ones_like(ids)
-            logits = dec.run(None, feed)[0][:, -1, :]
+            if kv:
+                logits, past = kv[1].run(None, {'input_ids': ids[:, -1:], 'past_kv': past, 'cross_kv': cross})
+            else:
+                feed = {}
+                for name in dnames:
+                    if 'input_ids' in name:
+                        feed[name] = ids
+                    elif 'encoder_hidden_states' in name:
+                        feed[name] = hidden
+                    elif 'attention_mask' in name:
+                        feed[name] = np.ones_like(ids)
+                logits = dec.run(None, feed)[0][:, -1, :]
             nxt = logits.argmax(axis=-1)
             pm = _softmax_max(logits)
             for b in range(n):

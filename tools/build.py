@@ -6,6 +6,8 @@
                                        （homr 的模型要先下載進去：跑一次 homr --init，或從已下載的地方複製 .onnx）
   audiveris\\                          Audiveris 5.11.0 Console 版 msi 用 msiexec /a 解開後的 Audiveris 資料夾
   models\\mfd、models\\mfr              試卷辨識的算式模型（Pix2Text mfd-1.5-onnx、mfr-1.5-onnx，從 %APPDATA%\\pix2text\\1.1 複製）
+                                       models\\mfr 另外要跑 python tools\\export_mfr_kv.py 產生 decoder_step.onnx、decoder_cross.onnx
+                                       （記住前面結果的版本，算式辨識快 2 倍；要 torch、onnx，只有打包的電腦需要）
   site-packages 另外要有 tokenizers   試卷辨識的 MFR 用（不需要 huggingface_hub）
 用法：python tools\\build.py [--zip] [--exam]
   --exam：試卷版（不含樂譜辨識的 Audiveris、homr，約 300 MB），組在 dist\\exam\\vi-tools辨識套件\\，
@@ -29,7 +31,7 @@ DIST = ROOT / 'dist' / ('exam' if EXAM else '') / NAME
 PY_ZIP = B / 'dl' / 'python-3.12.10-embed-amd64.zip'
 # 執行環境（runtime\python 的套件、runtime\models、Audiveris）的版本：加了套件、換了模型就加 1。
 # 裝的比新版要的舊 → 辨識套件不能只換 app\，請使用者下載整包（app\update.py）
-RUNTIME = 1
+RUNTIME = 2   # 2：models\mfr 多 decoder_cross.onnx、decoder_step.onnx（算式辨識快 2 倍，2026-11-13）
 
 
 def copytree(src, dst):
@@ -40,7 +42,8 @@ def copytree(src, dst):
 
 def main():
     for need in (PY_ZIP, B / 'site-packages', *(() if EXAM else (B / 'audiveris' / 'Audiveris.exe',)), B / 'site-packages' / 'tokenizers',
-                 B / 'models' / 'mfd' / 'pix2text-mfd-1.5.onnx', B / 'models' / 'mfr' / 'decoder_model.onnx'):
+                 B / 'models' / 'mfd' / 'pix2text-mfd-1.5.onnx', B / 'models' / 'mfr' / 'decoder_model.onnx',
+                 B / 'models' / 'mfr' / 'decoder_step.onnx', B / 'models' / 'mfr' / 'decoder_cross.onnx'):
         if not need.exists():
             sys.exit('缺少 ' + str(need))
     DIST.mkdir(parents=True, exist_ok=True)
