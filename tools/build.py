@@ -70,7 +70,7 @@ def main():
         for p in (B / 'site-packages').glob('tokenizers*'):
             shutil.copytree(p, sp / p.name, ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
     mo = DIST / 'runtime' / 'models'
-    if not (mo / 'mfr' / 'decoder_model.onnx').exists():
+    if not (mo / 'mfr' / 'decoder_step.onnx').exists():   # 舊的 dist 沒有 KV 模型也要重新複製
         print('複製算式模型…')
         copytree(B / 'models', mo)
     copytree(ROOT / 'app', DIST / 'app')
