@@ -278,6 +278,36 @@ def union(boxes):
     return [min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes)]
 
 
+# 題組開頭（2026-11-15 整理 113～115 會考、103～115 會考考古題、113～114 學校段考的寫法）：
+#   【題組一】；題組…；(請)閱讀下列敘述後，回答42～43題／閱讀下列選文，回答第 44 至 45 題／請閱讀以下短文，並回答25～26題（「回答…N～M題」在行中任何位置，
+#   前面可能有 ※ ◎）；英語單獨一行 (20-21)、(第 31-35 題，每題 2 分…)；13-14為題組
+GROUP_HEAD = re.compile(r'^\s*(?:【|〔|［|\[)|^\s*[(（]?\s*題組'
+                        r'|回答\s*第?\s*[\d０-９]+\s*(?:[～~〜至\-－—–]|到)\s*[\d０-９]+\s*題'
+                        r'|^\s*[(（]\s*(?:第\s*)?\d+\s*[-～~〜–－]\s*\d+\s*(?:題[^)）]*)?[)）](?=\s|\\|\$|$)'
+                        r'|^\s*[(（]\s*第\s*\d+\s*[-～~〜–－]\s*\d+\s*題'
+                        r'|\d+\s*[-～~〜–－]\s*\d+\s*為題組')
+
+BRACKET_LABEL = re.compile(r'^\s*[【〔［\[]\s*\w{1,3}\s*[】〕］\]]\s*$')
+
+
+def group_not_label(t):
+    """題組說明（不收進附圖當標籤）；圖上的【1】【甲】這種短標籤不算。"""
+    return bool(GROUP_HEAD.search(t)) and not BRACKET_LABEL.match(t)
+
+
+def option_ends(cur, ln):
+    """選項後面的一行文字不是選項換行的續行，而是新的一段（題組說明、題組文章）：
+    開頭是「【」「題組」；或比選項的起點還靠左（選項縮排，文章從欄的左邊開始）；或跟選項隔了一大段空白。
+    2026-11-15 自然卷：「(D)…地函相等。」後面的「【題組八】」整篇文章被收進選項。"""
+    t = ln['text'].strip()
+    lh = max(ln['box'][3] - ln['box'][1], 1)
+    if GROUP_HEAD.search(t):
+        return True
+    if ln['box'][0] < cur['box'][0] - 0.8 * lh:
+        return True
+    return ln['box'][1] - cur['box'][3] > 1.5 * lh
+
+
 def auto_blocks(page, gray, page_no):
     """自動分區塊。回傳 [{id, type, box, items:[項目索引], order}]，order 是閱讀順序。"""
     items = page['items']
@@ -304,6 +334,7 @@ def auto_blocks(page, gray, page_no):
     for fb, isimg in [(r, True) for r in imgfigs] + [(f, False) for f in figs]:
         near = [fb[0] - 80, fb[1] - 90, fb[2] + 80, fb[3] + 90]
         mine = [it['i'] for it in items if it['i'] not in used and not behind_line(it, fb, items) and
+                not (it['kind'] == 'text' and group_not_label(it['text'])) and  # 題組說明「(20-21)」不是圖的標籤
                 not (it['i'] in sent and not inside(it['box'], fb)) and (
                 (isimg and it.get('src') == 'ocr' and inside(it['box'], fb, 4)) or  # 圖片裡辨識出的字
                 (isimg and it['kind'] == 'text' and inside(it['box'], fb, 60) and label_line(it) and
@@ -317,6 +348,7 @@ def auto_blocks(page, gray, page_no):
             # 第二輪：圖片加上已收的標籤之後，外圍的直排座標軸名稱（次、數、(、人、)）也收進來；圖說從整個範圍算
             fb = union([fb] + [items[i]['box'] for i in mine])
             mine += [it['i'] for it in items if it['i'] not in used and it['i'] not in mine and it['kind'] == 'text'
+                     and not group_not_label(it['text'])
                      and inside(it['box'], fb, 50) and label_line(it) and len(it['text'].strip()) <= 10
                      and not CAPTION.match(it['text'].strip()) and not behind_line(it, fb, items)
                      and not (it['i'] in sent and not inside(it['box'], fb))]
@@ -379,9 +411,12 @@ def auto_blocks(page, gray, page_no):
                 if typ == 'option' and cur['type'] == 'question':
                     pass  # 選項另成一塊
                 elif typ == 'text' and cur['type'] == 'option':
-                    cur['items'] += idx  # 選項換行的續行
-                    cur['box'] = union([cur['box'], ln['box']])
-                    continue
+                    if not option_ends(cur, ln):
+                        cur['items'] += idx  # 選項換行的續行
+                        cur['box'] = union([cur['box'], ln['box']])
+                        continue
+                elif typ == 'text' and cur['type'] == 'question' and GROUP_HEAD.search(ln['text']):
+                    pass  # 題組說明另成一塊（前一題沒有選項）；題組說明自己折行的「…請回答18～20題」照接
                 elif cur['type'] == typ or (typ == 'text' and cur['type'] == 'question'):
                     cur['items'] += idx
                     cur['box'] = union([cur['box'], ln['box']])
@@ -1352,7 +1387,7 @@ def page_continuations(pages, blocks):
         if not prev or not cur or prev[-1]['type'] not in ('question', 'option') or cur[0]['type'] != 'text':
             continue
         t = ' '.join(block_lines(pages[k], cur[0])).strip()
-        if t and not (QNUM.match(t) or SECTION.match(t) or OPTION.match(t) or BULLET.match(t)):
+        if t and not (QNUM.match(t) or SECTION.match(t) or OPTION.match(t) or BULLET.match(t) or GROUP_HEAD.search(t)):
             cur[0]['type'] = prev[-1]['type']
             cur[0]['cont'] = True
 

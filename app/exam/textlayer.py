@@ -63,6 +63,52 @@ def to_display(box, W0, H0, rot):
     return x0, y0, x1, y1
 
 
+class Ch(tuple):
+    """一個字：(字, x0, y0, x1, y1)；sp＝PDF 文字層裡這個字前面有空白（英文的字間）。
+    用 tuple 的子類別，其他地方照舊當 tuple 用（c[1:] 切片回來是普通 tuple）。"""
+    sp = False
+
+
+LET = re.compile(r'[A-Za-zÀ-ÖØ-öø-ɏ]')   # 西文字母（不含 × ÷）
+LET_END = re.compile(r'[A-Za-zÀ-ÖØ-öø-ɏ0-9.,;:!?\'’”")\]]')   # 英文字、句子標點、閉引號、閉括號
+
+
+def need_space(p, c):
+    """英文字間：下一個字是字母（前面是字母、數字、句子標點、閉引號）；下一個是數字而前面是字母（for 2、Item 3）；
+    下一個是開引號、開括號而前面是字母或句子標點。數字跟數字、逗號前、( ) 這些不補（中文卷的 7,13,5、(A)8(B)9 照舊）"""
+    if LET.match(c):
+        return bool(LET_END.match(p))
+    if c.isdigit():
+        return bool(LET.match(p))
+    if c in '(“‘"':
+        return bool(LET.match(p) or p in ',;:!?')   # 題號「2.()」的句點後面不補
+    return False
+
+
+def spaced(cs):
+    """一行的字 → [(字, x0, x1)]，英文原本隔著空白的地方插一個空格（need_space；空格的範圍是兩個字中間）。
+    2026-11-15：英語卷文字層的空白原本全部丟掉，單字黏在一起（AmandawantstomakefruitteabyfollowingThe…）。
+    有中文的行（理化卷「50 g」「10 kgw」、題號「(A) F甲」）只補字母跟字母之間（Majolica tile、Ice Core），其他照舊"""
+    zh = any(ZH_LINE.search(c[0]) for c in cs)
+
+    def word(k, step):   # 從第 k 個字往前（step=-1）或往後數連續的字母（含撇號）
+        n = 0
+        while 0 <= k < len(cs) and cs[k][0] and (LET.match(cs[k][0]) or cs[k][0] in "'’"):
+            n += bool(LET.match(cs[k][0]))
+            k += step
+        return n
+
+    out = []
+    for k, c in enumerate(cs):
+        if k and getattr(c, 'sp', False) and c[0] and cs[k - 1][0]:
+            p, n = cs[k - 1][0][-1], c[0][0]
+            # 中文行：兩邊都是兩個字母以上的英文字才補（Ice Core；圖上的標籤 AE L、A O 不補）
+            if (word(k - 1, -1) >= 2 and word(k, 1) >= 2) if zh else need_space(p, n):
+                out.append((' ', cs[k - 1][3], max(cs[k - 1][3], c[1])))
+        out.append((c[0], c[1], c[3]))
+    return out
+
+
 def chars_of(page, dpi):
     """→ [(字, x0, y0, x1, y1)]（畫面的像素座標，左上原點；頁面有設旋轉 90 度的也換成畫面座標），
     去掉自動產生的空白換行、淺色字。"""
@@ -71,11 +117,15 @@ def chars_of(page, dpi):
     ox, top, W0, H0, rot, trim = frame(page)
     out, zys = [], []
     r, g, b, a = raw.c_uint(), raw.c_uint(), raw.c_uint(), raw.c_uint()
+    sp = False   # 上一個留下來的字之後有沒有空白（pdfium 自動補的也算：很多 PDF 的英文字間是用位置排開、沒有空白字元）
     for i in range(tp.count_chars()):
+        ch = tp.get_text_range(i, 1)
+        if ch and ch.isspace():
+            sp = True
+            continue
         if raw.FPDFText_IsGenerated(tp.raw, i):
             continue
-        ch = tp.get_text_range(i, 1)
-        if not ch or ch.isspace() or ch in '￾￿':
+        if not ch or ch in '￾￿':
             continue
         ch = enclosed(PUA.get(ch, ch))  # ⒈→1.、⑴→(1)
         if raw.FPDFText_GetFillColor(tp.raw, i, r, g, b, a) and min(r.value, g.value, b.value) > LIGHT:
@@ -89,7 +139,9 @@ def chars_of(page, dpi):
         if not (trim[0] <= (x0 + x1) / 2 <= trim[2] and trim[1] <= (tb + tt) / 2 <= trim[3]):
             continue  # 看不到的地方、裁切框外（出血、印刷資訊「…indd 下午 03:49」）
         bx = to_display((x0 - ox, top - t, x1 - ox, top - bt), W0, H0, rot)
-        out.append((ch,) + tuple(v * s for v in bx))
+        c = Ch((ch,) + tuple(v * s for v in bx))
+        c.sp, sp = sp, False
+        out.append(c)
         zys.append(zy)
     # 只印注音的字疊在另一個國字旁邊＝錯字旁標的正確字注音（改錯字題），不要；
     # 單獨的（寫國字題「這杯「ㄉㄨㄥ」瓜茶」）留著：輸出國字，點字照讀音轉出來就是那個注音
@@ -105,6 +157,7 @@ def chars_of(page, dpi):
 
 
 CJK_RE = re.compile(r'[一-鿿]')
+ZH_LINE = re.compile(r'[一-鿿　-〿＀-￯]')   # 國字、中文標點、全形字（(Ａ)75kgw 這種選項行也算中文行）
 
 
 def text_items(page, dpi, math_boxes, pad=2, allc=None, geometric=False, walls=()):
@@ -157,8 +210,9 @@ def text_items(page, dpi, math_boxes, pad=2, allc=None, geometric=False, walls=(
     for ln in lines:
         cs = ln['chars']
         box = (min(c[1] for c in cs), ln['y0'], max(c[3] for c in cs), ln['y1'])
-        items.append(dict(box=box, text=enclosed(''.join(c[0] for c in cs)),
-                          chars=[(c[0], c[1], c[3], 1.0) for c in cs], kind='text', score=1.0, iso=False,
+        sc = spaced(cs)
+        items.append(dict(box=box, text=enclosed(''.join(c[0] for c in sc)),
+                          chars=[(ch, x0, x1, 1.0) for ch, x0, x1 in sc], kind='text', score=1.0, iso=False,
                           src='pdf'))
     return items, drop
 
