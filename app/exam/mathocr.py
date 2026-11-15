@@ -93,10 +93,17 @@ def tidy(tex):
     t = re.sub(r'(^|[^\\])\{\s*\\\s*\}', r'\1', t)
     t = re.sub(r'\\protect\b\s*\.?\s*', '', t)  # 「且 \protect. AB∥CD」：模型多吐的，畫出來是紅字
     t = re.sub(r'(?:\s*\\)+\s*$', '', t)
-    # 三角形、角：{\triangle} A B C、\triangle{A B C} → \triangle ABC（vi-tools vtdoc.js triTex 同規則）
+    # 撇號 A′：A^{^{\prime}}、A^{\prime}、A^\prime → A'（vi-tools vtdoc.js primeTex 同規則）
+    def primes(m):
+        return "'" * m.group(1).count('\\prime')
+    t = re.sub(r'\^\s*\{\s*\^\s*\{\s*((?:\\prime\s*)+)\}\s*\}', primes, t)
+    t = re.sub(r'\^\s*\{\s*((?:\\prime\s*)+)\}', primes, t)
+    t = re.sub(r'\^\s*\\prime(?![A-Za-z])', "'", t)
+    t = re.sub(r"\\prime(?![A-Za-z])\s*", "'", t)
+    # 三角形、角：{\triangle} A B C、\triangle{A B C} → \triangle ABC（vi-tools vtdoc.js triTex 同規則；字母可接撇號）
     t = re.sub(r'\{\s*\\(triangle|angle)\s*\}', r'\\\1 ', t)
-    t = re.sub(r'\\(triangle|angle)\s*\{\s*([A-Z](?:\s*[A-Z]){0,2})\s*\}', r'\\\1 \2', t)
-    t = re.sub(r'\\(triangle|angle)(?![A-Za-z])\s*([A-Z](?:\s*[A-Z]){0,2})(?![A-Za-z])',
+    t = re.sub(r"\\(triangle|angle)\s*\{\s*([A-Z]'*(?:\s*[A-Z]'*){0,2})\s*\}", r'\\\1 \2', t)
+    t = re.sub(r"\\(triangle|angle)(?![A-Za-z])\s*([A-Z]'*(?:\s*[A-Z]'*){0,2})(?![A-Za-z])",
                lambda m: '\\' + m.group(1) + ' ' + re.sub(r'\s+', '', m.group(2)), t)
     t = re.sub(r'\s{2,}', ' ', t).strip()
     return t

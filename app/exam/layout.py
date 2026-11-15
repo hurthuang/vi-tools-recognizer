@@ -123,8 +123,10 @@ def in_sentence(it, items):
             return True
         # 夾在一行的中間（文字層的一整行橫跨算式：「首項為 a₁，公差為 d」算式框裡的字被拿掉了）：
         # 左右緊鄰都有那一行的字才算（3b5 參考公式頁的 a₁、d、n 被旁邊的附圖當成標籤收走）
+        # 算式框跟旁邊的字可以稍微重疊（會考自然「回答48～50題」：框蓋到「答」「題」的邊，被下面的圖表收走）
         cs = o.get('chars') or []
-        if cs and any(0 <= it['box'][0] - c[2] < gap for c in cs) and any(0 <= c[1] - it['box'][2] < gap for c in cs):
+        ov = -0.5 * (y1 - y0)
+        if cs and any(ov <= it['box'][0] - c[2] < gap for c in cs) and any(ov <= c[1] - it['box'][2] < gap for c in cs):
             return True
     return False
 
@@ -331,6 +333,10 @@ def auto_blocks(page, gray, page_no):
     used = set()
     blocks = []
     sent = sentence_chain(items)
+
+    def zh_in(fb):
+        return any(o['kind'] == 'text' and inside(o['box'], fb) and len(re.findall(r'[一-鿿]', o['text'])) >= 4
+                   for o in items)
     for fb, isimg in [(r, True) for r in imgfigs] + [(f, False) for f in figs]:
         near = [fb[0] - 80, fb[1] - 90, fb[2] + 80, fb[3] + 90]
         mine = [it['i'] for it in items if it['i'] not in used and not behind_line(it, fb, items) and
@@ -343,6 +349,10 @@ def auto_blocks(page, gray, page_no):
                  and not OPTION.match(it['text'].strip()) and not QNUM.match(it['text'])) or  # 地圖上的(丁)
                 (not in_sentence(it, items) and
                  ((inside(it['box'], fb, 12) and is_label(it)) or
+                  # 整個落在線條圖範圍裡的算式（英語卷漫畫被誤認的亂碼算式 \begin{cases}…）；
+                  # 框裡有中文句子的是文字框（參考公式），不算
+                  (not isimg and it['kind'] == 'math' and fb[0] <= it['box'][0] and it['box'][2] <= fb[2]
+                   and fb[1] <= it['box'][1] and it['box'][3] <= fb[3] and not zh_in(fb)) or
                   ((overlap(it['box'], fb) > 0.6 or overlap(it['box'], near) > 0.9) and label_line(it)))))]
         if isimg and mine:
             # 第二輪：圖片加上已收的標籤之後，外圍的直排座標軸名稱（次、數、(、人、)）也收進來；圖說從整個範圍算
@@ -1170,6 +1180,10 @@ def render_nodes(pages, blocks_by_page, drops=None):
                 out += [node(l, '', 'opt', pi, b) for l in lines]
             else:
                 out += [node(l, '', 'text', pi, b) for l in lines]
+                if b.get('listed') or GROUP_HEAD.search(lines[0]):
+                    # 題組說明、附圖裡的條列後面的附圖標在這裡（不是前一題）：傳單、實驗步驟的圖
+                    last_q = ('t', pi, b['id'])
+                    qpos[last_q] = len(out) - 1
     sec_drops.append((sec_title, sec_pts, sec_q))
     if drops is not None:
         for title, pts, qs in sec_drops:
@@ -1374,8 +1388,33 @@ def auto_all(d):
         blocks.append(auto_blocks(p, gray, n))
     repeated_to_skip(pages, blocks)
     page_continuations(pages, blocks)
+    lists_in_figures(pages, blocks)
     figures_own_labels(pages, blocks)
     return pages, blocks
+
+
+def lists_in_figures(pages, blocks):
+    """附圖（傳單、海報）範圍裡的條列「1. 2. 3.」：題號比前面的題目小（從 1 重新數）→ 改成一般文字，不當題目。
+    大題（一、選擇題）之後重新數。2026-11-15 115 會考英語：傳單上的規則被當成第 1～4 題。"""
+    last = 0
+    for p, bl in zip(pages, blocks):
+        figs = [b for b in bl if b['type'] == 'figure']
+        for b in sorted(bl, key=lambda b: b['order']):
+            if b['type'] == 'section':
+                last = 0
+            if b['type'] != 'question':
+                continue
+            t = ' '.join(block_lines(p, b)).strip()
+            m = QNUM.match(t)
+            if not m:
+                continue
+            n = int(m.group(1))
+            host = next((f for f in figs if inside(b['box'], f['box'])), None) if n < last else None
+            if host is None:
+                last = n
+                continue
+            b['type'] = 'text'
+            b['listed'] = True
 
 
 def page_continuations(pages, blocks):
@@ -1402,7 +1441,7 @@ def repeated_to_skip(pages, blocks):
             if b['type'] not in ('text', 'title', 'section'):
                 continue
             t = ' '.join(block_lines(p, b))
-            if len(t) > 50 or QNUM.match(t):
+            if len(t) > 50 or QNUM.match(t) or group_not_label(t):  # 題組說明「(22-23)」每頁都在頂端不是頁首
                 continue
             k = re.sub(r'\d+', '#', re.sub(r'\s', '', t))
             keyed.append((pi, b, k, (b['box'][1] + b['box'][3]) / 2 / p['h']))
